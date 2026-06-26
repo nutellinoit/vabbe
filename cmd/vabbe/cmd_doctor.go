@@ -24,30 +24,30 @@ var doctorCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("docker daemon unreachable: %w", err)
 		}
-		fmt.Printf("✓ Docker reachable (API %s, OS %s)\n", ping.APIVersion, ping.OSType)
+		fmt.Printf("%s Docker reachable (API %s, OS %s)\n", green("✓"), ping.APIVersion, ping.OSType)
 		info, err := dk.Info(ctx)
 		if err != nil {
-			fmt.Println("⚠ Info() failed:", err)
+			fmt.Println(yellow("⚠")+" Info() failed:", err)
 		} else {
 			fmt.Printf("  daemon: %s %s\n", info.OperatingSystem, info.Architecture)
 			if isDockerDesktop(info) {
-				fmt.Println("⚠ Docker Desktop: if kubeadm swap preflight fails run `vabbe host-prep`")
+				fmt.Println(yellow("⚠") + " Docker Desktop: if kubeadm swap preflight fails run `vabbe host-prep`")
 			} else if runtime.GOOS == "linux" {
-				fmt.Println("i on Linux: run `vabbe host-prep` (or `sudo swapoff -a` + needed modprobes) if swap/modules errors occur")
+				fmt.Println(blue("i") + " on Linux: run `vabbe host-prep` (or `sudo swapoff -a` + needed modprobes) if swap/modules errors occur")
 			}
 		}
 		if _, err := os.Stat(cfgFile); err == nil {
 			lab, lerr := Load(cfgFile)
 			if lerr != nil {
-				fmt.Printf("✗ %s invalid: %s\n", cfgFile, lerr)
+				fmt.Printf("%s %s invalid: %s\n", red("✗"), cfgFile, lerr)
 			} else {
-				fmt.Printf("✓ lab %q valid: %d nodes, subnet %s\n", lab.Name, len(lab.Nodes), lab.Network.Subnet)
+				fmt.Printf("%s lab %s valid: %d nodes, subnet %s\n", green("✓"), bold(lab.Name), len(lab.Nodes), lab.Network.Subnet)
 				for i := range lab.Nodes {
 					n := &lab.Nodes[i]
 					fmt.Printf("  - %s %s (%s)\n", n.Name, n.IP, n.Image)
 				}
 				if lab.Runner() == nil {
-					fmt.Println("i no `runner: true` node set (needed by `vabbe shell`)")
+					fmt.Println(blue("i") + " no `runner: true` node set (needed by `vabbe shell`)")
 				}
 			}
 		}

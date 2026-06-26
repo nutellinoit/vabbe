@@ -59,6 +59,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "file", "f", "vabbe.yaml", "lab config file")
+	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable colored output (also respects NO_COLOR)")
 }
 
 func main() {

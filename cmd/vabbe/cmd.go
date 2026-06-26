@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -33,19 +34,19 @@ var upCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Printf("lab %q on subnet %s\n", lab.Name, lab.Network.Subnet)
+		fmt.Printf("lab %s on subnet %s\n", bold(lab.Name), lab.Network.Subnet)
 		for i := range lab.Nodes {
 			n := &lab.Nodes[i]
 			warns, recreated, err := dk.EnsureNode(ctx, lab, n, pub, upRecreate)
 			if err != nil {
 				return err
 			}
-			fmt.Printf("  ✓ %s %s (%s)\n", n.Name, n.IP, n.Image)
+			fmt.Printf("  %s %s %s (%s)\n", green("✓"), n.Name, n.IP, n.Image)
 			switch {
 			case recreated:
-				fmt.Printf("    ~ recreated (config changed: %s)\n", strings.Join(warns, ", "))
+				fmt.Printf("    %s recreated (config changed: %s)\n", cyan("~"), strings.Join(warns, ", "))
 			case len(warns) > 0:
-				fmt.Printf("    ! config changed (%s): run `vabbe down`/`up` or `up --recreate` to apply\n", strings.Join(warns, ", "))
+				fmt.Printf("    %s config changed (%s): run `vabbe down`/`up` or `up --recreate` to apply\n", yellow("!"), strings.Join(warns, ", "))
 			}
 		}
 		if upWait {
@@ -69,7 +70,7 @@ func waitReady(ctx context.Context, dk *Docker, lab *Lab, timeout time.Duration)
 			}
 			time.Sleep(time.Second)
 		}
-		fmt.Printf("  ✓ %s ready\n", n.Name)
+		fmt.Printf("  %s %s ready\n", green("✓"), n.Name)
 	}
 	return nil
 }
@@ -122,6 +123,8 @@ var downCmd = &cobra.Command{
 	},
 }
 
+var lsJSON bool
+
 var lsCmd = &cobra.Command{
 	Use:   "ls",
 	Short: "List nodes in the lab",
@@ -134,9 +137,14 @@ var lsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%-20s %-18s %-30s %s\n", "NODE", "IP", "IMAGE", "STATUS")
+		type row struct {
+			Node   string `json:"node"`
+			IP     string `json:"ip"`
+			Image  string `json:"image"`
+			Status string `json:"status"`
+		}
+		rows := make([]row, 0, len(cs))
 		for _, c := range cs {
-			name := c.Names[0][1:]
 			ip := ""
 			if c.NetworkSettings != nil {
 				if ep := c.NetworkSettings.Networks[lab.Name]; ep != nil {
@@ -151,7 +159,25 @@ var lsCmd = &cobra.Command{
 			if c.State == "running" {
 				status = "Up"
 			}
-			fmt.Printf("%-20s %-18s %-30s %s\n", name, ip, c.Image, status)
+			rows = append(rows, row{c.Names[0][1:], ip, c.Image, status})
+		}
+		if lsJSON {
+			b, _ := json.MarshalIndent(rows, "", "  ")
+			fmt.Println(string(b))
+			return nil
+		}
+		fmt.Printf("%-20s %-18s %-30s %s\n", "NODE", "IP", "IMAGE", "STATUS")
+		for _, r := range rows {
+			s := r.Status
+			switch s {
+			case "Up":
+				s = green(s)
+			case "restarting", "paused":
+				s = yellow(s)
+			default:
+				s = red(s)
+			}
+			fmt.Printf("%-20s %-18s %-30s %s\n", r.Node, r.IP, r.Image, s)
 		}
 		return nil
 	},
@@ -294,6 +320,7 @@ func init() {
 	)
 	downCmd.Flags().BoolVar(&downKeepNet, "keep-net", false, "keep the lab network after removing containers")
 	downCmd.Flags().BoolVar(&downAll, "all", false, "remove ALL vabbe-managed labs on the daemon (ignores -f config)")
+	lsCmd.Flags().BoolVar(&lsJSON, "json", false, "output as JSON")
 	shellCmd.Flags().StringVar(&shellPref, "shell", "", "shell to use (default: bash if present, else sh)")
 	sshCmd.Flags().StringVar(&shellPref, "shell", "", "shell to use (default: bash if present, else sh)")
 	upCmd.Flags().BoolVar(&upRecreate, "recreate", false, "recreate nodes whose config has drifted (image/env/mounts/ports/privileged/entrypoint/cmd)")
