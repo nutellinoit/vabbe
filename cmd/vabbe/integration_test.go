@@ -128,6 +128,11 @@ nodes:
 	if !published {
 		t.Fatalf("cp0 did not bind 22/tcp -> 127.0.0.1:12222, got %+v", info.HostConfig.PortBindings)
 	}
+
+	// `vabbe shell` should default to bash on a node that has it.
+	if s := dk.pickShell(ctx, lab.Name, "cp0"); s != "bash" {
+		t.Errorf("pickShell(cp0) = %q, want bash", s)
+	}
 	if c, derr := net.DialTimeout("tcp", "127.0.0.1:12222", 3*time.Second); derr == nil {
 		_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
 		b := make([]byte, 64)

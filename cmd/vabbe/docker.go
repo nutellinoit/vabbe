@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types"
@@ -24,6 +26,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
+	"golang.org/x/term"
 )
 
 const (
@@ -491,6 +494,9 @@ func (d *Docker) Exec(ctx context.Context, labName, nodeName string, cmd []strin
 	}
 	defer attach.Close()
 	if tty {
+		if restore := d.setupRawTTY(ctx, id.ID); restore != nil {
+			defer restore()
+		}
 		go func() { _, _ = io.Copy(attach.Conn, os.Stdin) }()
 		done := make(chan struct{})
 		go func() {
@@ -507,6 +513,51 @@ func (d *Docker) Exec(ctx context.Context, labName, nodeName string, cmd []strin
 	// Non-tty: demultiplex the docker stream (stdout+stderr frames).
 	_, _ = stdcopy.StdCopy(os.Stdout, os.Stderr, attach.Reader)
 	return d.execStatus(ctx, id.ID)
+}
+
+// setupRawTTY puts the local terminal in raw mode and forwards its size (and
+// later SIGWINCH resizes) to the exec session, so interactive shells get working
+// arrow keys and line editing. Returns a restore func, or nil if stdin isn't a
+// terminal.
+func (d *Docker) setupRawTTY(ctx context.Context, execID string) func() {
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		return nil
+	}
+	state, err := term.MakeRaw(fd)
+	if err != nil {
+		return nil
+	}
+	resize := func() {
+		if w, h, err := term.GetSize(fd); err == nil {
+			_ = d.c.ContainerExecResize(ctx, execID, container.ResizeOptions{Width: uint(w), Height: uint(h)})
+		}
+	}
+	resize()
+	winch := make(chan os.Signal, 1)
+	signal.Notify(winch, syscall.SIGWINCH)
+	go func() {
+		for range winch {
+			resize()
+		}
+	}()
+	return func() {
+		signal.Stop(winch)
+		close(winch)
+		_ = term.Restore(fd, state)
+	}
+}
+
+// pickShell returns "bash" if the node has it, else "sh".
+func (d *Docker) pickShell(ctx context.Context, labName, nodeName string) string {
+	c, err := d.findContainer(ctx, labName, nodeName)
+	if err != nil || c == nil {
+		return "sh"
+	}
+	if code, err := d.execCode(ctx, c.ID, []string{"sh", "-c", "command -v bash >/dev/null 2>&1"}); err == nil && code == 0 {
+		return "bash"
+	}
+	return "sh"
 }
 
 func (d *Docker) execStatus(ctx context.Context, id string) error {

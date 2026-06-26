@@ -192,12 +192,17 @@ var keygenCmd = &cobra.Command{
 	},
 }
 
-// sshInto runs an interactive shell in the node (bash, falling back to sh).
+var shellPref string
+
+// sshInto runs an interactive shell in the node. The shell is `--shell` if set,
+// else bash when present (falling back to sh).
 func sshInto(dk *Docker, labName, node string) error {
-	if err := dk.Exec(context.Background(), labName, node, []string{"bash"}, true); err != nil {
-		return dk.Exec(context.Background(), labName, node, []string{"sh"}, true)
+	ctx := context.Background()
+	shell := shellPref
+	if shell == "" {
+		shell = dk.pickShell(ctx, labName, node)
 	}
-	return nil
+	return dk.Exec(ctx, labName, node, []string{shell}, true)
 }
 
 var sshCmd = &cobra.Command{
@@ -289,6 +294,8 @@ func init() {
 	)
 	downCmd.Flags().BoolVar(&downKeepNet, "keep-net", false, "keep the lab network after removing containers")
 	downCmd.Flags().BoolVar(&downAll, "all", false, "remove ALL vabbe-managed labs on the daemon (ignores -f config)")
+	shellCmd.Flags().StringVar(&shellPref, "shell", "", "shell to use (default: bash if present, else sh)")
+	sshCmd.Flags().StringVar(&shellPref, "shell", "", "shell to use (default: bash if present, else sh)")
 	upCmd.Flags().BoolVar(&upRecreate, "recreate", false, "recreate nodes whose config has drifted (image/env/mounts/ports/privileged/entrypoint/cmd)")
 	upCmd.Flags().BoolVar(&upWait, "wait", false, "wait until each node is reachable (sshd up) before returning")
 	upCmd.Flags().DurationVar(&upTimeout, "timeout", 90*time.Second, "max time to wait when --wait is set")
