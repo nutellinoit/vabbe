@@ -97,6 +97,14 @@ nodes:
 		t.Fatalf("runner could not SSH cp0 with lab key: %v", sshErr)
 	}
 
+	// Node DNS: vabbe-resolv must have replaced Docker's 127.0.0.11 with the
+	// configured upstream (default 1.1.1.1), or pods (CoreDNS) can't resolve.
+	if err := dk.Exec(ctx, lab.Name, "cp0", []string{"sh", "-c",
+		"grep -q '1.1.1.1' /etc/resolv.conf && ! grep -q '127.0.0.11' /etc/resolv.conf"}, false); err != nil {
+		_ = dk.Exec(ctx, lab.Name, "cp0", []string{"cat", "/etc/resolv.conf"}, false)
+		t.Fatalf("cp0 resolv.conf not rewritten to a pod-reachable upstream: %v", err)
+	}
+
 	// Drift warning: change the runner entrypoint and reconcile. up must report
 	// the change instead of silently doing nothing.
 	lab.Nodes[1].Entrypoint = []string{"/bin/sleep", "120"}

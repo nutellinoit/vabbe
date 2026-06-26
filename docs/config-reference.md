@@ -7,11 +7,13 @@ network:
 defaults:                   # optional, applied to every node before the node's own fields
   image: <image>
   privileged: <bool>
+  dns: [<ip>...]            # optional; node resolv.conf upstreams (default [1.1.1.1, 1.0.0.1])
 nodes:                      # at least one
   - name: <node-name>       # required; becomes the container hostname unless `hostname` is set
     ip: <ipv4>              # required; must be in `network.subnet`, unique across the lab
     image: <image>          # optional; falls back to defaults.image, then the vabbe default
     privileged: <bool>      # optional; defaults true (defaults to true)
+    dns: [<ip>...]          # optional; overrides defaults.dns for this node
     entrypoint: [<str>...]  # optional; overrides the image's ENTRYPOINT (runner-friendly)
     cmd: [<str>...]         # optional; overrides the image's CMD
     mounts: [<bind>...]     # optional; `host:container[:ro]`
@@ -28,6 +30,10 @@ nodes:                      # at least one
 - `privileged: true` for VM nodes.
 - tmpfs on `/run`, `/run/lock`, `/tmp`.
 - `StopSignal: SIGRTMIN+3` (clean systemd shutdown).
+- Node `/etc/resolv.conf` is rewritten at boot to the `dns:` upstreams (default
+  `1.1.1.1`, `1.0.0.1`), replacing Docker's embedded `127.0.0.11` — see
+  `docs/gotchas.md`. Runners keep Docker's resolver. Set `dns:` for an
+  internal/corporate resolver.
 - `restart: unless-stopped`.
 - `Hostname` = node name (unless overridden).
 - VM nodes bind-mount `/lib/modules:/lib/modules:ro` (so `modprobe` finds `modules.builtin`).

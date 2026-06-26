@@ -27,7 +27,7 @@ mise use -g github:nutellinoit/vabbe
 ```yaml
 name: e2e
 network: { subnet: 10.10.1.0/24 }
-defaults: { image: ghcr.io/nutellinoit/vabbe-node:v0.0.2 }
+defaults: { image: ghcr.io/nutellinoit/vabbe-node:v0.0.3 }
 nodes:
   - { name: a, ip: 10.10.1.2 }
   - { name: b, ip: 10.10.1.3 }

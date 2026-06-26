@@ -161,3 +161,21 @@ Linux it runs `swapoff -a` + the needed `modprobe`s directly (run it as root —
 it never calls `sudo` itself). It's safe by default: it only **prints the plan**
 unless you pass `--run`, never runs during `up`, prints every command, and can
 be undone with `--restore`.
+
+## 13. Node DNS: Docker's `127.0.0.11` isn't reachable from pods
+
+On a user-defined network Docker writes `nameserver 127.0.0.11` (its embedded
+DNS) into the node's `/etc/resolv.conf`. That address is NAT-magic that only
+works in the node's **root** netns — it is **unreachable from a pod netns**.
+Kubernetes CoreDNS runs as a pod with `dnsPolicy: Default` (it inherits the node
+resolv.conf), forwards to `127.0.0.11`, and dies with
+`[FATAL] plugin/loop: Loop detected for zone "."`; anything needing cluster DNS
+then fails. On a real VM resolv.conf holds a real upstream, so this never
+happens. `docker --dns` does **not** fix it — on a user-defined network Docker
+still puts `127.0.0.11` in resolv.conf and `--dns` only changes what sits behind
+it. So vabbe rewrites the node's resolv.conf at boot (the `vabbe-resolv.service`
+unit) to the `dns:` upstreams, default `1.1.1.1`/`1.0.0.1`. Set `dns:` for an
+internal/corporate resolver. Losing Docker's per-container-name resolution is
+fine — vabbe nodes address each other by static IP. Runners keep Docker's
+resolver (they're clients in the node netns, not pods). Same spirit as `kind`:
+never hand pods a resolver that only lives in the node's netns.
