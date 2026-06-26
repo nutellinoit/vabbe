@@ -1,0 +1,17 @@
+#!/bin/sh
+# vabbe: replace Docker's embedded resolver (127.0.0.11) in the node's
+# resolv.conf with a pod-reachable upstream. 127.0.0.11 is NAT-magic that only
+# works in the node's root netns, so Kubernetes CoreDNS (which inherits the
+# node resolv.conf) forwards to it and loops/dies. VABBE_DNS (space-separated)
+# is set by vabbe from the lab's `dns:` config; with no value we leave the file
+# untouched.
+set -eu
+ns=$(tr '\0' '\n' < /proc/1/environ | sed -n 's/^VABBE_DNS=//p')
+[ -n "${ns:-}" ] || exit 0
+tmp=$(mktemp)
+for s in $ns; do
+  printf 'nameserver %s\n' "$s"
+done >"$tmp"
+# Write through the bind-mounted resolv.conf (truncate + replace its content).
+cat "$tmp" >/etc/resolv.conf
+rm -f "$tmp"

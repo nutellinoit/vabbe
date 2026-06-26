@@ -12,6 +12,23 @@ import (
 
 const DefaultImage = "ghcr.io/nutellinoit/vabbe-node:24.04"
 
+// defaultDNS is written into a node's resolv.conf when neither the node nor the
+// lab sets `dns:`. Docker's embedded 127.0.0.11 only works in the node's root
+// netns, so Kubernetes pods (CoreDNS) can't use it — a real upstream is needed.
+var defaultDNS = []string{"1.1.1.1", "1.0.0.1"}
+
+// NodeDNS resolves the upstream resolvers for a node: node `dns:` wins, then the
+// lab `defaults.dns:`, then the built-in public default.
+func (l *Lab) NodeDNS(n *Node) []string {
+	if len(n.DNS) > 0 {
+		return n.DNS
+	}
+	if len(l.Defaults.DNS) > 0 {
+		return l.Defaults.DNS
+	}
+	return defaultDNS
+}
+
 type Lab struct {
 	Name     string   `yaml:"name"`
 	Network  Network  `yaml:"network"`
@@ -25,8 +42,9 @@ type Network struct {
 }
 
 type Defaults struct {
-	Image      *string `yaml:"image"`
-	Privileged *bool   `yaml:"privileged"`
+	Image      *string  `yaml:"image"`
+	Privileged *bool    `yaml:"privileged"`
+	DNS        []string `yaml:"dns"`
 }
 
 type Node struct {
@@ -42,6 +60,7 @@ type Node struct {
 	Hostname   string            `yaml:"hostname"`
 	Runner     bool              `yaml:"runner"`
 	Privileged *bool             `yaml:"privileged"`
+	DNS        []string          `yaml:"dns"`
 }
 
 func Load(path string) (*Lab, error) {

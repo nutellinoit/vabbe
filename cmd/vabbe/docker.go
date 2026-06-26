@@ -167,9 +167,14 @@ func (d *Docker) createNode(ctx context.Context, lab *Lab, node *Node, pubKeyPat
 		binds[i] = absBind(lab.Dir(), b)
 	}
 	tmpfs := map[string]string{"/run": "", "/run/lock": "", "/tmp": ""}
-	env := make([]string, 0, len(node.Env))
+	env := make([]string, 0, len(node.Env)+1)
 	for k, v := range node.Env {
 		env = append(env, k+"="+v)
+	}
+	// vabbe-resolv.service reads VABBE_DNS at boot to replace Docker's embedded
+	// 127.0.0.11 resolver with a pod-reachable upstream.
+	if dns := lab.NodeDNS(node); len(dns) > 0 {
+		env = append(env, "VABBE_DNS="+strings.Join(dns, " "))
 	}
 	hc := &container.HostConfig{
 		Privileged:      privileged,

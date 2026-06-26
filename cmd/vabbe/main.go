@@ -20,9 +20,14 @@ var (
 // imageBases lists the node image flavors we can build, in stable order.
 var imageBases = []string{"ubuntu", "rocky"}
 
-// sharedUnitFiles are systemd units COPYd into every node base; they must be
-// added to the SDK build context alongside the Dockerfile.
-var sharedUnitFiles = []string{"boot-id-token.service", "vabbe-rshared.service"}
+// sharedUnitFiles are the systemd units and helper scripts COPYd into every node
+// base; they must be added to the SDK build context alongside the Dockerfile.
+var sharedUnitFiles = []string{
+	"boot-id-token.service",
+	"vabbe-rshared.service",
+	"vabbe-resolv.service",
+	"vabbe-resolv",
+}
 
 // baseDockerfile returns the embedded Dockerfile for a node base (e.g. "ubuntu").
 func baseDockerfile(base string) ([]byte, error) {

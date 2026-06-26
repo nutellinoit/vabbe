@@ -1,0 +1,15 @@
+[Unit]
+Description=vabbe: point node DNS at a pod-reachable upstream (replaces Docker's 127.0.0.11)
+Documentation=https://github.com/nutellinoit/vabbe
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=sysinit.target
+ConditionVirtualization=container
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vabbe-resolv
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target
