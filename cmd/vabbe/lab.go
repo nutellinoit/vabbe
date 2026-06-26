@@ -63,7 +63,10 @@ func Load(path string) (*Lab, error) {
 	if len(lab.Nodes) == 0 {
 		return nil, fmt.Errorf("at least one node is required")
 	}
-	lab.dir = filepath.Dir(path)
+	// Resolve the lab dir to an absolute path. Relative bind sources (e.g.
+	// "./:/workspace") are joined against this; Docker rejects a relative bind
+	// source as a (too-short) volume name, so the base must be absolute.
+	lab.dir = absPath(filepath.Dir(path))
 	lab.applyDefaults()
 	if err := lab.validate(); err != nil {
 		return nil, err

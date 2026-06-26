@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -21,6 +22,29 @@ func writeLab(t *testing.T, dir, content string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// Regression: a relative -f path (e.g. the default "vabbe.yaml") left lab.dir
+// as ".", so a relative mount like "./:/workspace" resolved to the bare "."
+// bind source, which Docker rejects as a too-short volume name.
+func TestLoadAbsDirAndBind(t *testing.T) {
+	dir := t.TempDir()
+	rel := filepath.Join(dir, "vabbe.yaml")
+	if err := os.WriteFile(rel, []byte(minimalLab), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lab, err := Load(rel)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !filepath.IsAbs(lab.Dir()) {
+		t.Fatalf("lab.Dir() must be absolute, got %q", lab.Dir())
+	}
+	got := absBind(lab.Dir(), "./:/workspace")
+	src := strings.SplitN(got, ":", 3)[0]
+	if !filepath.IsAbs(src) {
+		t.Fatalf("bind source must be absolute, got %q (from %q)", src, got)
+	}
 }
 
 func TestLoadMinimal(t *testing.T) {
