@@ -31,7 +31,7 @@ var imageBuildCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("base %q: %w", imageBase, err)
 		}
-		unit, err := bootIDUnit()
+		extras, err := sharedContextFiles()
 		if err != nil {
 			return err
 		}
@@ -41,7 +41,7 @@ var imageBuildCmd = &cobra.Command{
 		}
 		tags := []string{imageTag}
 		fmt.Printf("building %s (base: %s) ...\n", imageTag, imageBase)
-		if err := dk.BuildImage(context.Background(), dockerfile, unit, tags, os.Stdout); err != nil {
+		if err := dk.BuildImage(context.Background(), dockerfile, extras, tags, os.Stdout); err != nil {
 			return err
 		}
 		fmt.Printf("done: %s\n", imageTag)

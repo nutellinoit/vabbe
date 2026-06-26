@@ -1,0 +1,16 @@
+[Unit]
+Description=vabbe: make / rshared so CNIs (e.g. cilium) can propagate cgroup/bpf mounts
+Documentation=https://github.com/nutellinoit/vabbe
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=sysinit.target
+ConditionVirtualization=container
+
+[Service]
+Type=oneshot
+# `-` so a node without CAP_SYS_ADMIN doesn't fail boot; privileged VM nodes succeed.
+ExecStart=-/bin/mount --make-rshared /
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

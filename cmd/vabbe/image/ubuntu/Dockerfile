@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM ubuntu:24.04
 COPY boot-id-token.service /etc/systemd/system/boot-id-token.service
+COPY vabbe-rshared.service /etc/systemd/system/vabbe-rshared.service
 RUN apt-get update && apt-get install -y --no-install-recommends \
       systemd systemd-sysv dbus \
       openssh-server sudo python3 python3-apt \
@@ -10,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && mkdir -p /run/sshd /root/.ssh && chmod 700 /root/.ssh \
  && systemctl enable ssh \
  && systemctl enable boot-id-token.service \
+ && systemctl enable vabbe-rshared.service \
  && printf 'PermitRootLogin prohibit-password\nPasswordAuthentication no\nStrictModes no\n' \
       > /etc/ssh/sshd_config.d/vabbe.conf
 RUN systemctl mask systemd-udevd.service systemd-udev-trigger.service \

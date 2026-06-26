@@ -492,8 +492,14 @@ func (d *Docker) execStatus(ctx context.Context, id string) error {
 	return nil
 }
 
-func (d *Docker) BuildImage(ctx context.Context, dockerfile, bootIDUnit []byte, tags []string, w io.Writer) error {
-	ctxBytes, err := buildContext(dockerfile, bootIDUnit)
+// contextFile is one entry (besides the Dockerfile) in the SDK build context tar.
+type contextFile struct {
+	name string
+	data []byte
+}
+
+func (d *Docker) BuildImage(ctx context.Context, dockerfile []byte, extras []contextFile, tags []string, w io.Writer) error {
+	ctxBytes, err := buildContext(dockerfile, extras)
 	if err != nil {
 		return err
 	}
@@ -527,16 +533,11 @@ func (d *Docker) BuildImage(ctx context.Context, dockerfile, bootIDUnit []byte, 
 	}
 }
 
-func buildContext(dockerfile, bootIDUnit []byte) (*bytes.Buffer, error) {
+func buildContext(dockerfile []byte, extras []contextFile) (*bytes.Buffer, error) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
-	for _, f := range []struct {
-		name string
-		data []byte
-	}{
-		{"Dockerfile", dockerfile},
-		{"boot-id-token.service", bootIDUnit},
-	} {
+	files := append([]contextFile{{"Dockerfile", dockerfile}}, extras...)
+	for _, f := range files {
 		if err := tw.WriteHeader(&tar.Header{Name: f.name, Mode: 0o644, Size: int64(len(f.data))}); err != nil {
 			return nil, err
 		}
