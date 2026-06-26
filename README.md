@@ -5,7 +5,7 @@
 </h1>
 <!-- markdownlint-enable MD033 MD041 -->
 
-> *vabbè* — Italian for *"eh, whatever, fine."* Making VMs out of containers is an antipattern. We know. But it's **good enough** for throwaway test environments, so — *vabbè*.
+> *vabbè* — Italian for *"eh, whatever, fine."* Making VMs out of containers is an antipattern. I know. But it's **good enough** for throwaway test environments, so — *vabbè*.
 
 `vabbe` spins up Docker containers that act like throwaway VMs (systemd + sshd, static IPs on a network you define) for testing installers — like `kind`, but the nodes are generic VMs instead of a k8s cluster.
 
