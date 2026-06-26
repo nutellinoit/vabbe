@@ -29,7 +29,7 @@ mise use -g github:nutellinoit/vabbe
 ```yaml
 name: e2e
 network: { subnet: 10.10.1.0/24 }
-defaults: { image: ghcr.io/nutellinoit/vabbe-node:v0.0.5 }
+defaults: { image: ghcr.io/nutellinoit/vabbe-node:v0.1.0 }
 nodes:
   - { name: a, ip: 10.10.1.2 }
   - { name: b, ip: 10.10.1.3 }
@@ -50,6 +50,7 @@ vabbe dns          # nip.io hostnames per node (--common-dns-zone for sslip.io/e
 vabbe shell        # drop into the runner (in-network driver)
 vabbe exec a -- ping -c1 10.10.1.3     # container↔container works
 vabbe down         # remove containers + network
+vabbe down --all   # remove ALL vabbe labs on the daemon (no -f needed; orphan cleanup)
 ```
 
 ## The one rule that surprises people

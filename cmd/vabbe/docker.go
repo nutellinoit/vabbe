@@ -379,11 +379,32 @@ func (d *Docker) ListByLab(ctx context.Context, labName string) ([]container.Sum
 }
 
 func (d *Docker) Down(ctx context.Context, lab *Lab, keepNet bool) ([]string, error) {
-	removed := []string{}
 	cs, err := d.ListByLab(ctx, lab.Name)
 	if err != nil {
 		return nil, err
 	}
+	return d.removeAll(ctx, cs, fmt.Sprintf("%s=%s", labelLab, lab.Name), keepNet)
+}
+
+// DownAll removes every vabbe-managed container and network on the daemon,
+// identified by the presence of the `vabbe.lab` label — so it can clean up
+// orphaned labs even when their `vabbe.yaml` is gone.
+func (d *Docker) DownAll(ctx context.Context, keepNet bool) ([]string, error) {
+	cs, err := d.c.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: filters.NewArgs(filters.Arg("label", labelLab)),
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(cs, func(i, j int) bool { return cs[i].Names[0] < cs[j].Names[0] })
+	return d.removeAll(ctx, cs, labelLab, keepNet)
+}
+
+// removeAll force-removes the given containers (with their anonymous volumes) and,
+// unless keepNet, the networks matching labelArg (`key` or `key=value`).
+func (d *Docker) removeAll(ctx context.Context, cs []container.Summary, labelArg string, keepNet bool) ([]string, error) {
+	removed := []string{}
 	for _, c := range cs {
 		name := strings.TrimPrefix(c.Names[0], "/")
 		if err := d.c.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true, RemoveVolumes: true}); err != nil {
@@ -392,13 +413,15 @@ func (d *Docker) Down(ctx context.Context, lab *Lab, keepNet bool) ([]string, er
 		removed = append(removed, name)
 	}
 	if !keepNet {
-		found, err := d.findNetwork(ctx, lab.Name)
+		nws, err := d.c.NetworkList(ctx, network.ListOptions{
+			Filters: filters.NewArgs(filters.Arg("label", labelArg)),
+		})
 		if err != nil {
-			return removed, err
+			return removed, fmt.Errorf("list networks: %w", err)
 		}
-		if found {
-			if err := d.c.NetworkRemove(ctx, lab.Name); err != nil {
-				return removed, fmt.Errorf("remove network %s: %w", lab.Name, err)
+		for _, nw := range nws {
+			if err := d.c.NetworkRemove(ctx, nw.ID); err != nil {
+				return removed, fmt.Errorf("remove network %s: %w", nw.Name, err)
 			}
 		}
 	}

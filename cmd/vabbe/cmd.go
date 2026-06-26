@@ -74,17 +74,39 @@ func waitReady(ctx context.Context, dk *Docker, lab *Lab, timeout time.Duration)
 	return nil
 }
 
-var downKeepNet bool
+var (
+	downKeepNet bool
+	downAll     bool
+)
 
 var downCmd = &cobra.Command{
 	Use:   "down",
 	Short: "Tear everything down by label (containers + network)",
 	RunE: func(*cobra.Command, []string) error {
+		ctx := context.Background()
+		// --all ignores the config and removes every vabbe-managed lab on the
+		// daemon, so it can clean up orphans whose vabbe.yaml is gone.
+		if downAll {
+			dk, err := NewDocker()
+			if err != nil {
+				return err
+			}
+			removed, err := dk.DownAll(ctx, downKeepNet)
+			if err != nil {
+				return err
+			}
+			for _, n := range removed {
+				fmt.Printf("  removed container %s\n", n)
+			}
+			fmt.Printf("  removed %d vabbe container(s); %s\n", len(removed),
+				map[bool]string{true: "kept networks", false: "removed networks"}[downKeepNet])
+			return nil
+		}
 		lab, dk, err := loadAndDocker()
 		if err != nil {
 			return err
 		}
-		removed, err := dk.Down(context.Background(), lab, downKeepNet)
+		removed, err := dk.Down(ctx, lab, downKeepNet)
 		if err != nil {
 			return err
 		}
@@ -266,6 +288,7 @@ func init() {
 		sshCmd, shellCmd, execCmd, logsCmd,
 	)
 	downCmd.Flags().BoolVar(&downKeepNet, "keep-net", false, "keep the lab network after removing containers")
+	downCmd.Flags().BoolVar(&downAll, "all", false, "remove ALL vabbe-managed labs on the daemon (ignores -f config)")
 	upCmd.Flags().BoolVar(&upRecreate, "recreate", false, "recreate nodes whose config has drifted (image/env/mounts/ports/privileged/entrypoint/cmd)")
 	upCmd.Flags().BoolVar(&upWait, "wait", false, "wait until each node is reachable (sshd up) before returning")
 	upCmd.Flags().DurationVar(&upTimeout, "timeout", 90*time.Second, "max time to wait when --wait is set")
