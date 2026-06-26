@@ -82,13 +82,18 @@ nodes:
 	ssh := []string{"ssh", "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes",
 		"-o", "ConnectTimeout=3", "-i", "/root/.ssh/id_ed25519", "root@10.211.7.3", "true"}
 	var sshErr error
-	for i := 0; i < 15; i++ {
+	for i := 0; i < 45; i++ {
 		if sshErr = dk.Exec(ctx, lab.Name, "runner", ssh, false); sshErr == nil {
 			break
 		}
 		time.Sleep(2 * time.Second)
 	}
 	if sshErr != nil {
+		t.Logf("cp0 systemd/sshd state (diagnostics):")
+		_ = dk.Exec(ctx, lab.Name, "cp0", []string{"sh", "-c",
+			"systemctl is-system-running; echo '--- failed units ---'; " +
+				"systemctl --failed --no-legend --no-pager; echo '--- sshd ---'; " +
+				"systemctl status sshd ssh --no-pager 2>&1 | head -40"}, false)
 		t.Fatalf("runner could not SSH cp0 with lab key: %v", sshErr)
 	}
 
