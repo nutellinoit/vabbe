@@ -66,7 +66,7 @@ nodes:
 		t.Fatalf("EnsureKeypair: %v", err)
 	}
 	for i := range lab.Nodes {
-		if _, err := dk.EnsureNode(ctx, lab, &lab.Nodes[i], pub); err != nil {
+		if _, _, err := dk.EnsureNode(ctx, lab, &lab.Nodes[i], pub, false); err != nil {
 			t.Fatalf("EnsureNode %s: %v", lab.Nodes[i].Name, err)
 		}
 	}
@@ -95,11 +95,23 @@ nodes:
 	// Drift warning: change the runner entrypoint and reconcile. up must report
 	// the change instead of silently doing nothing.
 	lab.Nodes[1].Entrypoint = []string{"/bin/sleep", "120"}
-	warns, err := dk.EnsureNode(ctx, lab, &lab.Nodes[1], pub)
+	warns, recreated, err := dk.EnsureNode(ctx, lab, &lab.Nodes[1], pub, false)
 	if err != nil {
 		t.Fatalf("EnsureNode reconcile: %v", err)
 	}
+	if recreated {
+		t.Fatal("node must not be recreated without --recreate")
+	}
 	if !slices.Contains(warns, "entrypoint") {
 		t.Fatalf("expected entrypoint drift warning, got %v", warns)
+	}
+
+	// With recreate=true the drifted node is rebuilt and reported as recreated.
+	warns, recreated, err = dk.EnsureNode(ctx, lab, &lab.Nodes[1], pub, true)
+	if err != nil {
+		t.Fatalf("EnsureNode recreate: %v", err)
+	}
+	if !recreated || !slices.Contains(warns, "entrypoint") {
+		t.Fatalf("expected recreate on entrypoint drift, got recreated=%v warns=%v", recreated, warns)
 	}
 }

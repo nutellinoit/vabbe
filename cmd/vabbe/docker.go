@@ -80,17 +80,65 @@ func (d *Docker) findNetwork(ctx context.Context, name string) (bool, error) {
 
 // EnsureNode creates the node if missing, otherwise reconciles it. The returned
 // strings are config-drift warnings: fields whose desired value differs from the
-// running container. We only warn (not recreate) because labs are throwaway and
-// `down`/`up` is the cheap, unambiguous way to apply such changes.
-func (d *Docker) EnsureNode(ctx context.Context, lab *Lab, node *Node, pubKeyPath string) ([]string, error) {
+// running container. By default we only warn (not recreate) because labs are
+// throwaway and `down`/`up` is the cheap, unambiguous way to apply such changes;
+// with recreate=true a drifted node is removed and recreated instead, and the
+// returned bool reports whether that happened.
+func (d *Docker) EnsureNode(ctx context.Context, lab *Lab, node *Node, pubKeyPath string, recreate bool) ([]string, bool, error) {
 	existing, err := d.findContainer(ctx, lab.Name, node.Name)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if existing != nil {
-		return d.reconcile(ctx, lab, node, existing)
+	if existing == nil {
+		return nil, false, d.createNode(ctx, lab, node, pubKeyPath)
 	}
-	return nil, d.createNode(ctx, lab, node, pubKeyPath)
+	if recreate {
+		if drift := d.drift(ctx, lab, node, existing.ID); len(drift) > 0 {
+			if err := d.c.ContainerRemove(ctx, existing.ID, container.RemoveOptions{Force: true}); err != nil {
+				return nil, false, fmt.Errorf("recreate %s: %w", node.Name, err)
+			}
+			return drift, true, d.createNode(ctx, lab, node, pubKeyPath)
+		}
+	}
+	w, err := d.reconcile(ctx, lab, node, existing)
+	return w, false, err
+}
+
+// Reachable reports whether a node is ready to be used. Server nodes are ready
+// once their sshd unit is active; runner nodes have no sshd (they are SSH
+// clients), so they count as ready once the container is running.
+func (d *Docker) Reachable(ctx context.Context, lab *Lab, node *Node) bool {
+	c, err := d.findContainer(ctx, lab.Name, node.Name)
+	if err != nil || c == nil {
+		return false
+	}
+	if node.Runner {
+		return c.State == "running"
+	}
+	code, err := d.execCode(ctx, c.ID, []string{"systemctl", "is-active", "ssh"})
+	return err == nil && code == 0
+}
+
+// execCode runs a command in a container and returns its exit code, discarding
+// output. Used for readiness probes where streaming would be noise.
+func (d *Docker) execCode(ctx context.Context, containerID string, cmd []string) (int, error) {
+	id, err := d.c.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+		Cmd: cmd, AttachStdout: true, AttachStderr: true,
+	})
+	if err != nil {
+		return -1, err
+	}
+	attach, err := d.c.ContainerExecAttach(ctx, id.ID, container.ExecAttachOptions{})
+	if err != nil {
+		return -1, err
+	}
+	_, _ = io.Copy(io.Discard, attach.Reader)
+	attach.Close()
+	insp, err := d.c.ContainerExecInspect(ctx, id.ID)
+	if err != nil {
+		return -1, err
+	}
+	return insp.ExitCode, nil
 }
 
 func (d *Docker) createNode(ctx context.Context, lab *Lab, node *Node, pubKeyPath string) error {

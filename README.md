@@ -31,11 +31,13 @@ nodes:
 ```
 
 ```
-vabbe up          # create network + containers, idempotent
-vabbe ls          # NODE IP IMAGE STATUS
-vabbe shell       # drop into the runner (in-network driver)
+vabbe up           # create network + containers, idempotent
+vabbe up --wait    # ...and block until each node's sshd is up (no boot race)
+vabbe up --recreate # rebuild nodes whose config drifted (else `up` just warns)
+vabbe ls           # NODE IP IMAGE STATUS
+vabbe shell        # drop into the runner (in-network driver)
 vabbe exec a -- ping -c1 10.10.1.3     # container↔container works
-vabbe down        # remove containers + network
+vabbe down         # remove containers + network
 ```
 
 ## The one rule that surprises people

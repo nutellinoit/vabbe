@@ -5,9 +5,16 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/spf13/cobra"
+)
+
+var (
+	upRecreate bool
+	upWait     bool
+	upTimeout  time.Duration
 )
 
 var upCmd = &cobra.Command{
@@ -29,17 +36,42 @@ var upCmd = &cobra.Command{
 		fmt.Printf("lab %q on subnet %s\n", lab.Name, lab.Network.Subnet)
 		for i := range lab.Nodes {
 			n := &lab.Nodes[i]
-			warns, err := dk.EnsureNode(ctx, lab, n, pub)
+			warns, recreated, err := dk.EnsureNode(ctx, lab, n, pub, upRecreate)
 			if err != nil {
 				return err
 			}
 			fmt.Printf("  ✓ %s %s (%s)\n", n.Name, n.IP, n.Image)
-			if len(warns) > 0 {
-				fmt.Printf("    ! config changed (%s): run `vabbe down`/`up` to apply\n", strings.Join(warns, ", "))
+			switch {
+			case recreated:
+				fmt.Printf("    ~ recreated (config changed: %s)\n", strings.Join(warns, ", "))
+			case len(warns) > 0:
+				fmt.Printf("    ! config changed (%s): run `vabbe down`/`up` or `up --recreate` to apply\n", strings.Join(warns, ", "))
+			}
+		}
+		if upWait {
+			if err := waitReady(ctx, dk, lab, upTimeout); err != nil {
+				return err
 			}
 		}
 		return nil
 	},
+}
+
+// waitReady blocks until every node is reachable (sshd up for server nodes),
+// so a following `ansible`/provisioning step does not race container boot.
+func waitReady(ctx context.Context, dk *Docker, lab *Lab, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for i := range lab.Nodes {
+		n := &lab.Nodes[i]
+		for !dk.Reachable(ctx, lab, n) {
+			if time.Now().After(deadline) {
+				return fmt.Errorf("timeout waiting for %s to become ready", n.Name)
+			}
+			time.Sleep(time.Second)
+		}
+		fmt.Printf("  ✓ %s ready\n", n.Name)
+	}
+	return nil
 }
 
 var downKeepNet bool
@@ -234,4 +266,7 @@ func init() {
 		sshCmd, shellCmd, execCmd, logsCmd,
 	)
 	downCmd.Flags().BoolVar(&downKeepNet, "keep-net", false, "keep the lab network after removing containers")
+	upCmd.Flags().BoolVar(&upRecreate, "recreate", false, "recreate nodes whose config has drifted (image/env/mounts/ports/privileged/entrypoint/cmd)")
+	upCmd.Flags().BoolVar(&upWait, "wait", false, "wait until each node is reachable (sshd up) before returning")
+	upCmd.Flags().DurationVar(&upTimeout, "timeout", 90*time.Second, "max time to wait when --wait is set")
 }
