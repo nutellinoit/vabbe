@@ -584,15 +584,50 @@ func absBind(base, b string) string {
 	return strings.Join(parts, ":")
 }
 
+// portSpec is one parsed `ports:` entry in the Docker `-p` syntax
+// `[ip:]host:node[/proto]` (bare `node` means host==node, tcp).
+type portSpec struct {
+	ip    string // listen address; "" = all interfaces
+	host  string // host port
+	node  string // container port
+	proto string // tcp | udp | sctp
+}
+
+func (s portSpec) natPort() nat.Port { return nat.Port(s.node + "/" + s.proto) }
+
+// parsePort parses `[ip:]host:node[/proto]`. Returns ok=false on a malformed
+// shape; numeric/protocol validation is done by validatePortSpec.
+func parsePort(p string) (portSpec, bool) {
+	s := portSpec{proto: "tcp"}
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		s.proto = strings.ToLower(p[i+1:])
+		p = p[:i]
+	}
+	parts := strings.Split(p, ":")
+	switch len(parts) {
+	case 1:
+		s.host, s.node = parts[0], parts[0]
+	case 2:
+		s.host, s.node = parts[0], parts[1]
+	case 3:
+		s.ip, s.host, s.node = parts[0], parts[1], parts[2]
+	default:
+		return portSpec{}, false
+	}
+	if s.host == "" || s.node == "" {
+		return portSpec{}, false
+	}
+	return s, true
+}
+
 func parsePortBindings(ports []string) nat.PortMap {
 	pm := nat.PortMap{}
 	for _, p := range ports {
-		parts := strings.SplitN(p, ":", 2)
-		if len(parts) == 1 {
-			pm[nat.Port(parts[0]+"/tcp")] = []nat.PortBinding{{HostPort: parts[0]}}
-		} else {
-			pm[nat.Port(parts[1]+"/tcp")] = []nat.PortBinding{{HostPort: parts[0]}}
+		s, ok := parsePort(p)
+		if !ok {
+			continue
 		}
+		pm[s.natPort()] = append(pm[s.natPort()], nat.PortBinding{HostIP: s.ip, HostPort: s.host})
 	}
 	return pm
 }

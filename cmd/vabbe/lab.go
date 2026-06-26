@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -167,6 +168,49 @@ func (l *Lab) validate() error {
 			return fmt.Errorf("node %q: ip %s already used by %q", n.Name, n.IP, prev)
 		}
 		seenIP[n.IP] = n.Name
+	}
+	return l.validatePorts()
+}
+
+// validatePorts checks every node's `ports:` entries parse, are in range, use a
+// known protocol, and that no two nodes claim the same host endpoint.
+func (l *Lab) validatePorts() error {
+	seenHost := map[string]string{} // "ip:host/proto" -> node
+	for _, n := range l.Nodes {
+		for _, p := range n.Ports {
+			s, ok := parsePort(p)
+			if !ok {
+				return fmt.Errorf("node %q: invalid port %q (want [ip:]host:node[/proto])", n.Name, p)
+			}
+			if err := validatePortNum(s.host); err != nil {
+				return fmt.Errorf("node %q port %q: host %w", n.Name, p, err)
+			}
+			if err := validatePortNum(s.node); err != nil {
+				return fmt.Errorf("node %q port %q: node %w", n.Name, p, err)
+			}
+			switch s.proto {
+			case "tcp", "udp", "sctp":
+			default:
+				return fmt.Errorf("node %q port %q: protocol must be tcp, udp or sctp", n.Name, p)
+			}
+			ip := s.ip
+			if ip == "" {
+				ip = "0.0.0.0"
+			}
+			key := ip + ":" + s.host + "/" + s.proto
+			if prev, ok := seenHost[key]; ok {
+				return fmt.Errorf("node %q: host port %s already published by %q", n.Name, key, prev)
+			}
+			seenHost[key] = n.Name
+		}
+	}
+	return nil
+}
+
+func validatePortNum(p string) error {
+	n, err := strconv.Atoi(p)
+	if err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("port %q out of range 1-65535", p)
 	}
 	return nil
 }
