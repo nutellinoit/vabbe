@@ -1,0 +1,14 @@
+[Unit]
+Description=vabbe per-boot token (for ansible.builtin.reboot boot_time_command)
+DefaultDependencies=no
+After=systemd-tmpfiles-setup.service
+ConditionPathExists=/run
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'cat /proc/sys/kernel/random/uuid > /run/boot-id-token'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
