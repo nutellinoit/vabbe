@@ -6,20 +6,23 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/system"
 	"github.com/spf13/cobra"
 )
 
-var hostPrepDry bool
+var (
+	hostPrepRun     bool
+	hostPrepRestore bool
+)
 
 var hostPrepCmd = &cobra.Command{
 	Use:   "host-prep",
 	Short: "Disable swap + ensure kernel modules on the host/VM (Linux or Docker Desktop)",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		dk, err := NewDocker()
 		if err != nil {
 			return err
@@ -30,61 +33,85 @@ var hostPrepCmd = &cobra.Command{
 			return err
 		}
 		if isDockerDesktop(info) {
-			return prepDockerDesktop(ctx, dk)
+			return prepDockerDesktop(ctx, dk, hostPrepRestore)
 		}
 		if runtime.GOOS != "linux" {
 			return fmt.Errorf("host-prep supports Linux hosts and Docker Desktop (got %q)",
 				info.OperatingSystem)
 		}
-		return prepLinux(info)
+		return prepLinux(hostPrepRestore)
 	},
 }
 
 const nsenter1Image = "justincormack/nsenter1"
 
-const nsenter1Cmd = "swapoff -a && modprobe ip_vs ip_vs_rr ip_vs_wrr ip_vs_sh nf_conntrack br_netfilter overlay 2>/dev/null || true"
+// swapStateFile holds the swap devices active before host-prep disabled them, so
+// --restore can re-enable exactly those. It lives in the VM's tmpfs /run: a
+// reboot wipes it, but a reboot also re-enables swap on its own, so that's fine.
+const swapStateFile = "/run/vabbe-hostprep.swap"
+
+const nsenter1PrepCmd = "swapon --show=NAME --noheadings > " + swapStateFile + " 2>/dev/null || true; " +
+	"swapoff -a && modprobe ip_vs ip_vs_rr ip_vs_wrr ip_vs_sh nf_conntrack br_netfilter overlay 2>/dev/null || true"
+
+// nsenter1RestoreCmd replays the snapshot if present, else falls back to
+// `swapon -a` (re-enable fstab swap). Either way it never fails the run.
+const nsenter1RestoreCmd = "if [ -s " + swapStateFile + " ]; then " +
+	"while IFS= read -r d; do swapon \"$d\" 2>/dev/null || true; done < " + swapStateFile + "; " +
+	"else swapon -a 2>/dev/null || true; fi"
 
 // prepDockerDesktop runs a short-lived privileged container joined to the
-// Docker Desktop VM's PID 1 namespace so it can swapoff/modprobe the VM kernel.
-func prepDockerDesktop(ctx context.Context, dk *Docker) error {
+// Docker Desktop VM's PID 1 namespace so it can swapoff/modprobe (or restore
+// swap on) the VM kernel.
+func prepDockerDesktop(ctx context.Context, dk *Docker, restore bool) error {
+	cmdStr := nsenter1PrepCmd
+	if restore {
+		cmdStr = nsenter1RestoreCmd
+	}
 	fmt.Printf("Docker Desktop detected. Running a privileged helper to enter the VM PID 1 namespace:\n")
 	fmt.Printf("  image: %s\n", nsenter1Image)
-	fmt.Printf("  cmd:   %s\n", nsenter1Cmd)
-	if hostPrepDry {
-		fmt.Println("(dry-run; not executed)")
+	fmt.Printf("  cmd:   %s\n", cmdStr)
+	if !hostPrepRun {
+		fmt.Println("(plan only — re-run with --run to execute)")
 		return nil
 	}
 	cli := dk.c
 	if err := dk.ensureImage(ctx, nsenter1Image); err != nil {
 		return err
 	}
+	// Clear any helper left behind by a previous crashed run before reusing the name.
+	_ = cli.ContainerRemove(ctx, "vabbe-host-prep", container.RemoveOptions{Force: true})
 	created, err := cli.ContainerCreate(ctx,
 		&container.Config{
 			Image:        nsenter1Image,
-			Cmd:          []string{"sh", "-c", nsenter1Cmd},
+			Cmd:          []string{"sh", "-c", cmdStr},
 			AttachStdout: true,
 			AttachStderr: true,
 		},
 		&container.HostConfig{
 			Privileged: true,
 			PidMode:    "host",
-			AutoRemove: true,
 		},
 		nil, nil, "vabbe-host-prep")
 	if err != nil {
 		return fmt.Errorf("create helper: %w", err)
 	}
+	// Remove the helper ourselves once output and exit code are captured. With
+	// AutoRemove the daemon could delete it mid-read, so a successful prep would
+	// still error with "no such container"/missing log file.
+	defer func() {
+		_ = cli.ContainerRemove(context.Background(), created.ID, container.RemoveOptions{Force: true})
+	}()
+	// Subscribe to the exit event before starting so the wait can never miss it.
+	statusC, errC := cli.ContainerWait(ctx, created.ID, container.WaitConditionNotRunning)
 	if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
 		return fmt.Errorf("start helper: %w", err)
 	}
-	logs, err := cli.ContainerLogs(ctx, created.ID, container.LogsOptions{
+	if logs, err := cli.ContainerLogs(ctx, created.ID, container.LogsOptions{
 		ShowStdout: true, ShowStderr: true, Follow: true,
-	})
-	if err == nil {
+	}); err == nil {
 		_, _ = io.Copy(os.Stdout, logs)
 		_ = logs.Close()
 	}
-	statusC, errC := cli.ContainerWait(ctx, created.ID, container.WaitConditionNotRunning)
 	select {
 	case status := <-statusC:
 		if status.StatusCode != 0 {
@@ -93,40 +120,119 @@ func prepDockerDesktop(ctx context.Context, dk *Docker) error {
 	case err := <-errC:
 		return err
 	}
-	fmt.Println("✓ host-prep done on Docker Desktop VM.")
+	if restore {
+		fmt.Println("✓ swap restored on Docker Desktop VM.")
+	} else {
+		fmt.Println("✓ host-prep done on Docker Desktop VM.")
+	}
 	return nil
 }
 
-// prepLinux shells out to sudo — host-prep is the explicit exception to the
-// "Engine API only" rule: it must touch the real host kernel.
-func prepLinux(info system.Info) error {
-	fmt.Println("Linux host detected. Running (requires sudo):")
-	for _, c := range [][]string{
-		{"sudo", "swapoff", "-a"},
-		{"sudo", "modprobe", "ip_vs"},
-		{"sudo", "modprobe", "ip_vs_rr"},
-		{"sudo", "modprobe", "ip_vs_wrr"},
-		{"sudo", "modprobe", "ip_vs_sh"},
-		{"sudo", "modprobe", "nf_conntrack"},
-		{"sudo", "modprobe", "br_netfilter"},
-		{"sudo", "modprobe", "overlay"},
-	} {
-		fmt.Printf("  %s\n", strings.Join(c, " "))
-		if hostPrepDry {
-			continue
-		}
-		c := exec.Command(c[0], c[1:]...)
-		c.Stdout = os.Stdout
-		c.Stderr = os.Stderr
-		if err := c.Run(); err != nil {
-			fmt.Printf("    (failed, continuing) %s\n", err)
-		}
+// linuxSwapStateFile is where the Linux path snapshots active swap devices.
+func linuxSwapStateFile() string { return filepath.Join(os.TempDir(), "vabbe-host-prep.swap") }
+
+// prepLinux prints the kernel ops it would run and, only with --run, executes
+// them directly — host-prep is the explicit exception to the "Engine API only"
+// rule: it touches the real host kernel. It never invokes sudo itself (that
+// would hide privilege escalation and hang in CI); --run requires root.
+func prepLinux(restore bool) error {
+	if err := requireRoot(restore); err != nil {
+		return err
 	}
-	fmt.Println("✓ host-prep done on Linux host.")
+	if restore {
+		return restoreLinux()
+	}
+	fmt.Println("Linux host detected. Commands:")
+	saveLinuxSwapState()
+	for _, c := range [][]string{
+		{"swapoff", "-a"},
+		{"modprobe", "ip_vs"},
+		{"modprobe", "ip_vs_rr"},
+		{"modprobe", "ip_vs_wrr"},
+		{"modprobe", "ip_vs_sh"},
+		{"modprobe", "nf_conntrack"},
+		{"modprobe", "br_netfilter"},
+		{"modprobe", "overlay"},
+	} {
+		runCmd(c)
+	}
+	fmt.Println(doneOrPlan("host-prep done on Linux host."))
 	return nil
+}
+
+// requireRoot fails when --run is set but we are not effectively root, pointing
+// at the exact re-run command so the user owns the privilege escalation. Without
+// --run we only print the plan, so root is not needed.
+func requireRoot(restore bool) error {
+	if !hostPrepRun || os.Geteuid() == 0 {
+		return nil
+	}
+	flag := ""
+	if restore {
+		flag = " --restore"
+	}
+	return fmt.Errorf("host-prep --run touches the host kernel and must run as root; re-run as root, e.g. `sudo vabbe host-prep%s --run`", flag)
+}
+
+// doneOrPlan returns the success line when executing, or a hint that nothing ran.
+func doneOrPlan(done string) string {
+	if hostPrepRun {
+		return "✓ " + done
+	}
+	return "(plan only — re-run as root with --run to execute)"
+}
+
+// saveLinuxSwapState records active swap devices (best-effort) so restoreLinux
+// can re-enable exactly those.
+func saveLinuxSwapState() {
+	if !hostPrepRun {
+		return
+	}
+	out, err := exec.Command("swapon", "--show=NAME", "--noheadings").Output()
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(linuxSwapStateFile(), out, 0o644)
+}
+
+// restoreLinux re-enables the snapshotted swap devices, falling back to
+// `swapon -a` when no snapshot exists (the hybrid restore).
+func restoreLinux() error {
+	fmt.Println("Restoring swap on Linux host. Commands:")
+	var cmds [][]string
+	if data, err := os.ReadFile(linuxSwapStateFile()); err == nil && len(strings.Fields(string(data))) > 0 {
+		for _, dev := range strings.Fields(string(data)) {
+			cmds = append(cmds, []string{"swapon", dev})
+		}
+	} else {
+		cmds = append(cmds, []string{"swapon", "-a"})
+	}
+	for _, c := range cmds {
+		runCmd(c)
+	}
+	fmt.Println(doneOrPlan("swap restored on Linux host."))
+	return nil
+}
+
+// runCmd prints and runs a command, continuing (not failing the whole run) if
+// it errors — a missing module or already-on swap should not abort host-prep.
+func runCmd(c []string) {
+	fmt.Printf("  %s\n", strings.Join(c, " "))
+	if !hostPrepRun {
+		return
+	}
+	cmd := exec.Command(c[0], c[1:]...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("    (failed, continuing) %s\n", err)
+	}
 }
 
 func init() {
 	rootCmd.AddCommand(hostPrepCmd)
-	hostPrepCmd.Flags().BoolVar(&hostPrepDry, "dry-run", false, "print what would run, do not execute")
+	hostPrepCmd.Flags().BoolVar(&hostPrepRun, "run", false,
+		"actually execute the host changes (default: print the plan only); on Linux requires root")
+	hostPrepCmd.Flags().BoolVar(&hostPrepRestore, "restore", false,
+		"re-enable swap captured by a previous host-prep (falls back to `swapon -a`)")
 }
