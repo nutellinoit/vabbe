@@ -1,0 +1,38 @@
+[tools]
+go = "1.25"
+golangci-lint = "latest"
+goreleaser = "latest"
+
+[env]
+CGO_ENABLED = "0"
+
+[tasks.build]
+run = "go build -o dist/vabbe ./cmd/vabbe"
+
+[tasks.test]
+run = "go test ./..."
+
+[tasks.lint]
+run = "golangci-lint run"
+
+[tasks.fmt]
+run = "gofmt -w ."
+
+[tasks.vet]
+run = "go vet ./..."
+
+[tasks.cross]
+run = """
+mkdir -p releases
+for GOOS in darwin linux; do
+  for GOARCH in amd64 arm64; do
+    go build -trimpath -ldflags "-s -w" -o "releases/vabbe-${GOOS}-${GOARCH}" ./cmd/vabbe
+  done
+done
+"""
+
+[tasks.release]
+run = "goreleaser release --clean"
+
+[tasks.coverage]
+run = "go test -cover ./..."

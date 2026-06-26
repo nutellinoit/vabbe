@@ -1,0 +1,7 @@
+dist/
+releases/
+.vabbe/
+/vabbe
+INITIAL_SPEC.md
+*.test
+*.out
