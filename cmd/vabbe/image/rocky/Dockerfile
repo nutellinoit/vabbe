@@ -10,7 +10,7 @@ RUN dnf -y install \
  && ssh-keygen -A \
  && systemctl enable sshd \
  && systemctl enable boot-id-token.service \
- && printf 'PermitRootLogin prohibit-password\nPasswordAuthentication no\nStrictModes no\n' \
+ && printf 'PermitRootLogin prohibit-password\nPasswordAuthentication no\nStrictModes no\nUsePAM no\n' \
       > /etc/ssh/sshd_config.d/vabbe.conf
 RUN systemctl mask systemd-udevd.service systemd-udev-trigger.service \
       sys-kernel-debug.mount sys-kernel-tracing.mount \
