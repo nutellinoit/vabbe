@@ -429,7 +429,7 @@ func absBind(base, b string) string {
 	if filepath.IsAbs(parts[0]) {
 		return b
 	}
-	parts[0] = filepath.Join(base, parts[0])
+	parts[0] = filepath.Clean(filepath.Join(base, parts[0]))
 	return strings.Join(parts, ":")
 }
 
