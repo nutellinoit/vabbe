@@ -1,5 +1,8 @@
-name: Tagged CLI release
+name: Release
 
+# One ordered pipeline on a v* tag: tests gate everything, then images publish,
+# then the GitHub CLI release is cut LAST — so the release never appears before
+# its images exist, and nothing is published if the integration tests fail.
 on:
   push:
     tags:
@@ -8,23 +11,106 @@ on:
 
 permissions:
   contents: write
+  packages: write
+
+env:
+  IMAGE: ghcr.io/nutellinoit/vabbe-node
 
 jobs:
-  publish-cli-release:
-    name: Publish CLI release
+  test:
+    name: Integration test (${{ matrix.base }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        base: [ubuntu, rocky]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Set up mise
-        uses: jdx/mise-action@v3
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
         with:
           install: true
           cache: true
+      - name: Build node image (local, single-arch)
+        run: docker build -t vabbe-node:ci -f cmd/vabbe/image/${{ matrix.base }}/Dockerfile cmd/vabbe/image
+      - name: Run integration test
+        env:
+          VABBE_IT_IMAGE: vabbe-node:ci
+        run: mise run test-it
 
+  images:
+    name: Publish node image (${{ matrix.base }})
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        base: [ubuntu, rocky]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Set image tags
+        id: meta
+        shell: bash
+        env:
+          BASE: ${{ matrix.base }}
+        run: |
+          ref_name="${GITHUB_REF_NAME}"
+          short_sha="${GITHUB_SHA::7}"
+          tags=()
+          tags+=("${IMAGE}:${BASE}-${ref_name}")
+          tags+=("${IMAGE}:${BASE}-sha-${short_sha}")
+          if [[ "${ref_name}" =~ -rc\. ]]; then
+            tags+=("${IMAGE}:${BASE}-rc")
+          else
+            tags+=("${IMAGE}:${BASE}")
+            tags+=("${IMAGE}:${BASE}-latest")
+          fi
+          # Ubuntu is the default base: keep the legacy unprefixed tags so existing
+          # references (:rc, :24.04, :latest, :vX.Y.Z) keep resolving.
+          if [[ "${BASE}" == "ubuntu" ]]; then
+            tags+=("${IMAGE}:${ref_name}")
+            tags+=("${IMAGE}:${ref_name#v}")
+            tags+=("${IMAGE}:sha-${short_sha}")
+            if [[ "${ref_name}" =~ -rc\. ]]; then
+              tags+=("${IMAGE}:rc")
+            else
+              tags+=("${IMAGE}:24.04")
+              tags+=("${IMAGE}:latest")
+            fi
+          fi
+          {
+            echo "tags<<EOF"
+            printf '%s\n' "${tags[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: cmd/vabbe/image
+          file: cmd/vabbe/image/${{ matrix.base }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+
+  cli-release:
+    name: Publish CLI release
+    needs: [test, images]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@v3
+        with:
+          install: true
+          cache: true
       - name: Run GoReleaser
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

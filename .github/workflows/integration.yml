@@ -1,13 +1,13 @@
 name: Integration (Docker)
 
 # Builds the node image from this commit's Dockerfile and runs the VABBE_IT
-# integration test against it. Self-contained (no registry), so it runs on every
-# branch push, on release tags, and on PRs — validating the CLI + image of that
-# exact commit before anything is published.
+# integration test against it. Self-contained (no registry) — the dev gate on
+# branch pushes and PRs. On v* tags the Release pipeline runs the same test as
+# its gate, so this one ignores tags to avoid a double run.
 on:
   push:
     branches: ["**"]
-    tags: ["v*"]
+    tags-ignore: ["*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
