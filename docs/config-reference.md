@@ -19,7 +19,12 @@ nodes:                      # at least one
     mounts: [<bind>...]     # optional; `host:container[:ro]`
     env: <map>              # optional; `${VAR}` expanded from host env at load time
     caps: [<cap>...]        # optional; e.g. [NET_ADMIN, NET_RAW] (ignored when privileged)
-    ports: [<host:container>...]  # optional; published to the Docker host (the only macOS host-reachable path)
+    ports: [<spec>...]      # optional; publish to the host. Docker `-p` syntax:
+                            #   "80"                    host 80  -> node 80/tcp
+                            #   "8080:80"               host 8080-> node 80/tcp
+                            #   "8080:80/udp"           protocol udp (tcp|udp|sctp)
+                            #   "127.0.0.1:6443:6443"   bind only localhost
+                            # The only macOS host-reachable path (Docker Desktop can't route node IPs).
     hostname: <name>        # optional; defaults to `name`
     runner: <bool>          # optional; marks this as the `vabbe shell` target. Implies "not a VM":
                             # no systemd assumptions, no forced privileged, no /lib/modules bind.

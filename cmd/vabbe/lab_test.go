@@ -68,6 +68,36 @@ func TestLoadMinimal(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsBadAndDuplicatePorts(t *testing.T) {
+	cases := map[string]string{
+		"bad protocol": `
+name: p
+network: { subnet: 10.10.1.0/24 }
+nodes:
+  - { name: a, ip: 10.10.1.2, ports: ["80:80/icmp"] }
+`,
+		"out of range": `
+name: p
+network: { subnet: 10.10.1.0/24 }
+nodes:
+  - { name: a, ip: 10.10.1.2, ports: ["99999:80"] }
+`,
+		"duplicate host port across nodes": `
+name: p
+network: { subnet: 10.10.1.0/24 }
+nodes:
+  - { name: a, ip: 10.10.1.2, ports: ["8080:80"] }
+  - { name: b, ip: 10.10.1.3, ports: ["8080:443"] }
+`,
+	}
+	for name, bad := range cases {
+		p := writeLab(t, t.TempDir(), bad)
+		if _, err := Load(p); err == nil {
+			t.Errorf("%s: expected validation error", name)
+		}
+	}
+}
+
 func TestLoadRejectsIPNotInSubnet(t *testing.T) {
 	dir := t.TempDir()
 	bad := `

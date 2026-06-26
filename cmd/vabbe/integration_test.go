@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -35,7 +37,7 @@ name: vabbeit
 network: { subnet: 10.211.7.0/24 }
 defaults: { image: %s, privileged: true }
 nodes:
-  - { name: cp0, ip: 10.211.7.3 }
+  - { name: cp0, ip: 10.211.7.3, ports: ["127.0.0.1:12222:22"] }
   - name: runner
     ip: 10.211.7.250
     image: %s
@@ -103,6 +105,25 @@ nodes:
 		"grep -q '1.1.1.1' /etc/resolv.conf && ! grep -q '127.0.0.11' /etc/resolv.conf"}, false); err != nil {
 		_ = dk.Exec(ctx, lab.Name, "cp0", []string{"cat", "/etc/resolv.conf"}, false)
 		t.Fatalf("cp0 resolv.conf not rewritten to a pod-reachable upstream: %v", err)
+	}
+
+	// Published port: cp0's sshd (127.0.0.1:12222 -> 22) must answer on the host.
+	var banner string
+	for i := 0; i < 15; i++ {
+		if c, derr := net.DialTimeout("tcp", "127.0.0.1:12222", 3*time.Second); derr == nil {
+			_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+			b := make([]byte, 64)
+			n, _ := c.Read(b)
+			_ = c.Close()
+			banner = string(b[:n])
+			if strings.HasPrefix(banner, "SSH-") {
+				break
+			}
+		}
+		time.Sleep(2 * time.Second)
+	}
+	if !strings.HasPrefix(banner, "SSH-") {
+		t.Fatalf("published port 127.0.0.1:12222 did not reach cp0 sshd (got %q)", banner)
 	}
 
 	// Drift warning: change the runner entrypoint and reconcile. up must report
