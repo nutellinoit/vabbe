@@ -50,14 +50,21 @@ func (d *Docker) Ping(ctx context.Context) (types.Ping, error)  { return d.c.Pin
 func (d *Docker) Info(ctx context.Context) (system.Info, error) { return d.c.Info(ctx) }
 
 func (d *Docker) EnsureNetwork(ctx context.Context, lab *Lab) error {
-	found, err := d.findNetwork(ctx, lab.Name)
-	if err != nil {
-		return err
-	}
-	if found {
+	// If a network with this name already exists, only reuse it when it is ours
+	// (carries our label) and its subnet still matches the config — otherwise we
+	// would silently hijack or contradict someone else's network.
+	if nw, err := d.c.NetworkInspect(ctx, lab.Name, network.InspectOptions{}); err == nil {
+		if nw.Labels[labelLab] != lab.Name {
+			return fmt.Errorf("network %q already exists and is not managed by vabbe (missing %s label); rename the lab or remove that network", lab.Name, labelLab)
+		}
+		if cur := networkSubnet(nw); cur != "" && cur != lab.Network.Subnet {
+			return fmt.Errorf("network %q exists with subnet %s but config wants %s; run `vabbe down` first", lab.Name, cur, lab.Network.Subnet)
+		}
 		return nil
+	} else if !cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("inspect network %s: %w", lab.Name, err)
 	}
-	_, err = d.c.NetworkCreate(ctx, lab.Name, network.CreateOptions{
+	_, err := d.c.NetworkCreate(ctx, lab.Name, network.CreateOptions{
 		Driver: "bridge",
 		IPAM: &network.IPAM{
 			Driver: "default",
@@ -71,14 +78,14 @@ func (d *Docker) EnsureNetwork(ctx context.Context, lab *Lab) error {
 	return nil
 }
 
-func (d *Docker) findNetwork(ctx context.Context, name string) (bool, error) {
-	nws, err := d.c.NetworkList(ctx, network.ListOptions{
-		Filters: filters.NewArgs(filters.Arg("label", fmt.Sprintf("%s=%s", labelLab, name))),
-	})
-	if err != nil {
-		return false, fmt.Errorf("list networks: %w", err)
+// networkSubnet returns the first configured IPv4 subnet of a network, or "".
+func networkSubnet(nw network.Inspect) string {
+	for _, c := range nw.IPAM.Config {
+		if c.Subnet != "" {
+			return c.Subnet
+		}
 	}
-	return len(nws) > 0, nil
+	return ""
 }
 
 // EnsureNode creates the node if missing, otherwise reconciles it. The returned
