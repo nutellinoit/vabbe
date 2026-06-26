@@ -31,7 +31,10 @@ nodes:                      # at least one
 - `restart: unless-stopped`.
 - `Hostname` = node name (unless overridden).
 - VM nodes bind-mount `/lib/modules:/lib/modules:ro` (so `modprobe` finds `modules.builtin`).
-- The lab's public key is bind-mounted to `/root/.ssh/authorized_keys:ro`.
+- The lab keypair is bind-mounted into **every** node (runners included):
+  public key to `/root/.ssh/authorized_keys:ro`, private key to
+  `/root/.ssh/id_ed25519:ro` — so any node, including the runner, can SSH its
+  peers with no extra `mounts:`.
 
 ## `${VAR}` expansion
 
@@ -43,5 +46,7 @@ at config load. Unset variables are left as-is.
 
 `runner: true` is sugar: it marks the node `vabbe shell` drops you into by
 default, and signals that the node is not a systemd VM (e.g. an Alpine/mise
-image with a custom entrypoint). vabbe doesn't force privileged `/lib/modules`
-binds on runners — set those yourself if you want them.
+image with a custom entrypoint). vabbe doesn't force the `/lib/modules` bind on
+runners — set that yourself if you want it. The lab keypair **is** still injected
+(see above), so a runner can `ssh`/`furyctl`/`ansible` its peers out of the box;
+you do **not** need to mount `id_ed25519` by hand.

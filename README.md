@@ -13,8 +13,12 @@
 
 ```
 go install github.com/nutellinoit/vabbe@latest
-# or: mise install  (in this repo) then `mise run build`
+# or with mise (global, prebuilt release binary):
+mise use -g github:nutellinoit/vabbe
+# or in this repo: mise install  then `mise run build`
 ```
+
+> Use the `github:` mise backend, not `ubi:` — mise deprecated the `ubi` backend.
 
 ## The one micro example
 
