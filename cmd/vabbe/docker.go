@@ -115,7 +115,10 @@ func (d *Docker) Reachable(ctx context.Context, lab *Lab, node *Node) bool {
 	if node.Runner {
 		return c.State == "running"
 	}
-	code, err := d.execCode(ctx, c.ID, []string{"systemctl", "is-active", "ssh"})
+	// The sshd unit is "ssh" on Debian/Ubuntu and "sshd" on RHEL/Rocky — accept
+	// either so readiness works across node bases.
+	code, err := d.execCode(ctx, c.ID, []string{"sh", "-c",
+		"systemctl is-active ssh >/dev/null 2>&1 || systemctl is-active sshd >/dev/null 2>&1"})
 	return err == nil && code == 0
 }
 
