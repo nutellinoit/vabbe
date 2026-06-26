@@ -19,8 +19,12 @@ permissions:
 
 jobs:
   build-node-image:
-    name: Build node image (no push)
+    name: Build node image (${{ matrix.base }}, no push)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        base: [ubuntu, rocky]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -35,7 +39,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: cmd/vabbe/image
-          file: cmd/vabbe/image/Dockerfile
+          file: cmd/vabbe/image/${{ matrix.base }}/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: false
-          tags: ghcr.io/nutellinoit/vabbe-node:ci
+          tags: ghcr.io/nutellinoit/vabbe-node:ci-${{ matrix.base }}

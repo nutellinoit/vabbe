@@ -28,4 +28,8 @@ jobs:
       - name: Run GoReleaser
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A fast-forward release tag (e.g. v0.0.2) can share a commit with its
+          # last rc tag; pin the version to the tag that triggered the run so
+          # GoReleaser doesn't pick the rc via `git describe`.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
         run: mise run release
