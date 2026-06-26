@@ -1,0 +1,81 @@
+name: image
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/nutellinoit/vabbe-node
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Ensure tag points to main
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          git fetch origin main --depth=1
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - name: Set release metadata
+        id: meta
+        shell: bash
+        run: |
+          ref_name="${GITHUB_REF_NAME}"
+          short_sha="${GITHUB_SHA::7}"
+          echo "short_sha=${short_sha}" >> "$GITHUB_OUTPUT"
+          if [[ "${ref_name}" =~ -rc\. ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "tags<<EOF"
+              echo "${IMAGE}:${ref_name}"
+              echo "${IMAGE}:${ref_name#v}"
+              echo "${IMAGE}:rc"
+              echo "${IMAGE}:sha-${short_sha}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "tags<<EOF"
+              echo "${IMAGE}:${ref_name}"
+              echo "${IMAGE}:${ref_name#v}"
+              echo "${IMAGE}:24.04"
+              echo "${IMAGE}:latest"
+              echo "${IMAGE}:sha-${short_sha}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: cmd/vabbe/image
+          file: cmd/vabbe/image/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}

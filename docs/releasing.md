@@ -1,8 +1,5 @@
 # Releasing vabbe
 
-> Work-in-progress. The CI workflows (`release.yml`, `image.yml`) are not in
-> this slice; this file documents the intended path so we wire it next.
-
 ## CLI binary — goreleaser, 4 targets
 
 Pure Go + `CGO_ENABLED=0` means all four targets are plain `go build`s:
@@ -14,16 +11,25 @@ Pure Go + `CGO_ENABLED=0` means all four targets are plain `go build`s:
 | linux  | amd64  | `releases/vabbe-linux-amd64`   |
 | linux  | arm64  | `releases/vabbe-linux-arm64`   |
 
-Local snapshot:
+Local checks:
 
 ```
 mise run cross        # cross-build into releases/
+mise run snapshot     # goreleaser snapshot, no publish
 mise run release      # goreleaser release --clean (needs a tag)
 ```
 
-The `.goreleaser.yaml` (to be added) sets `builds.goos: [darwin, linux]`,
-`builds.goarch: [amd64, arm64]`, `env: [CGO_ENABLED=0]`, archives as `.tar.gz`
-with a `checksums.txt`.
+`.goreleaser.yaml` builds `darwin/linux × amd64/arm64`, sets
+`CGO_ENABLED=0`, injects `main.version`, archives as `.tar.gz`, and writes a
+`checksums.txt`. `release.prerelease: auto` means `vX.Y.Z-rc.N` creates a
+GitHub prerelease, while `vX.Y.Z` creates a normal release.
+
+Release workflows only publish from tags that point to `main`:
+
+```bash
+git tag v0.1.0-rc.1
+git push origin v0.1.0-rc.1
+```
 
 ## Node image — multi-arch to GHCR
 
@@ -31,7 +37,8 @@ Container images are Linux-only. We publish **`linux/amd64` + `linux/arm64`**
 to `ghcr.io/nutellinoit/vabbe-node`:
 
 - registry: `ghcr.io/nutellinoit/vabbe-node`
-- tags: `:24.04`, `:latest`, and the git SHA/tag
+- stable tags (`vX.Y.Z`): `:vX.Y.Z`, `:X.Y.Z`, `:24.04`, `:latest`, and `:sha-<shortsha>`
+- prerelease tags (`vX.Y.Z-rc.N`): `:vX.Y.Z-rc.N`, `:X.Y.Z-rc.N`, `:rc`, and `:sha-<shortsha>`
 - public package so `docker pull` needs no auth
 - CI: `docker/setup-qemu-action` + `docker/setup-buildx-action` +
   `docker/login-action` (to `ghcr.io` with `GITHUB_TOKEN`,

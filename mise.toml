@@ -1,7 +1,7 @@
 [tools]
 go = "1.25"
 golangci-lint = "latest"
-goreleaser = "latest"
+goreleaser = "2.16.0"
 
 [env]
 CGO_ENABLED = "0"
@@ -38,7 +38,7 @@ done
 run = "goreleaser release --clean"
 
 [tasks.snapshot]
-run = "goreleaser release --snapshot --clean --skip=publish"
+run = "goreleaser release --snapshot --clean"
 
 [tasks.ci]
 depends = ["fmt-check", "lint", "test", "build"]
