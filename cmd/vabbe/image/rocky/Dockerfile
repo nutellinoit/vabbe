@@ -10,8 +10,12 @@ RUN dnf -y install \
  && ssh-keygen -A \
  && systemctl enable sshd \
  && systemctl enable boot-id-token.service \
- && printf 'PermitRootLogin prohibit-password\nPasswordAuthentication no\nStrictModes no\nUsePAM no\n' \
-      > /etc/ssh/sshd_config.d/vabbe.conf
+ && printf 'PermitRootLogin prohibit-password\nPasswordAuthentication no\nStrictModes no\n' \
+      > /etc/ssh/sshd_config.d/vabbe.conf \
+ # nsswitch lists `sss` first but sssd-client isn't installed; a lookup starting
+ # at a missing nss module is host-dependent and can make PAM fail to resolve
+ # root (sshd: "could not obtain user info (root)"). Resolve from files directly.
+ && sed -i -E 's/^(passwd|group|shadow):.*/\1:     files systemd/' /etc/nsswitch.conf
 RUN systemctl mask systemd-udevd.service systemd-udev-trigger.service \
       sys-kernel-debug.mount sys-kernel-tracing.mount \
       systemd-journald-audit.socket getty@tty1.service console-getty.service \
