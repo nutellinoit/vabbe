@@ -29,7 +29,7 @@ mise use -g github:nutellinoit/vabbe
 ```yaml
 name: e2e
 network: { subnet: 10.10.1.0/24 }
-defaults: { image: ghcr.io/nutellinoit/vabbe-node:v0.1.0 }
+defaults: { image: ghcr.io/nutellinoit/vabbe-node:v0.1.1 }
 nodes:
   - { name: a, ip: 10.10.1.2 }
   - { name: b, ip: 10.10.1.3 }
@@ -45,9 +45,10 @@ nodes:
 vabbe up           # create network + containers, idempotent
 vabbe up --wait    # ...and block until each node's sshd is up (no boot race)
 vabbe up --recreate # rebuild nodes whose config drifted (else `up` just warns)
-vabbe ls           # NODE IP IMAGE STATUS
+vabbe ls           # NODE IP IMAGE STATUS (colored; --json for scripting)
 vabbe dns          # nip.io hostnames per node (--common-dns-zone for sslip.io/etc)
-vabbe shell        # drop into the runner (in-network driver)
+vabbe inventory    # Ansible inventory of the server nodes (--runner for in-runner use)
+vabbe shell        # drop into the runner (bash by default; --shell to choose)
 vabbe exec a -- ping -c1 10.10.1.3     # container↔container works
 vabbe down         # remove containers + network
 vabbe down --all   # remove ALL vabbe labs on the daemon (no -f needed; orphan cleanup)
