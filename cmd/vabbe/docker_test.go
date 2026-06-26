@@ -46,9 +46,9 @@ func TestPortBound(t *testing.T) {
 
 func TestParsePort(t *testing.T) {
 	cases := []struct {
-		in                       string
-		ip, host, node, proto    string
-		ok                       bool
+		in                    string
+		ip, host, node, proto string
+		ok                    bool
 	}{
 		{"80", "", "80", "80", "tcp", true},
 		{"8080:80", "", "8080", "80", "tcp", true},
