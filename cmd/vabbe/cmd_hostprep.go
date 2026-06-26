@@ -1,9 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/spf13/cobra"
 )
 
@@ -50,14 +51,29 @@ const nsenter1Image = "justincormack/nsenter1"
 // reboot wipes it, but a reboot also re-enables swap on its own, so that's fine.
 const swapStateFile = "/run/vabbe-hostprep.swap"
 
-const nsenter1PrepCmd = "swapon --show=NAME --noheadings > " + swapStateFile + " 2>/dev/null || true; " +
-	"swapoff -a && modprobe ip_vs ip_vs_rr ip_vs_wrr ip_vs_sh nf_conntrack br_netfilter overlay 2>/dev/null || true"
+// hostPrepMarker is echoed only if the helper script ran to completion. Its
+// absence in the helper output means the command never executed (e.g. the VM
+// PID1 namespace couldn't exec the shell) — so we must not report success.
+const hostPrepMarker = "__vabbe_host_prep_ok__"
+
+// nsenter1PrepCmd runs under `set -e`, so a real `swapoff -a` failure aborts
+// before the marker (modprobe stays tolerant — builtin/loaded modules are fine).
+// PATH is set because swapoff/modprobe live in /sbin, not the bare-sh default.
+const nsenter1PrepCmd = "set -e\n" +
+	"export PATH=/sbin:/usr/sbin:/bin:/usr/bin\n" +
+	"swapon --show=NAME --noheadings > " + swapStateFile + " 2>/dev/null || true\n" +
+	"swapoff -a\n" +
+	"modprobe ip_vs ip_vs_rr ip_vs_wrr ip_vs_sh nf_conntrack br_netfilter overlay 2>/dev/null || true\n" +
+	"echo " + hostPrepMarker
 
 // nsenter1RestoreCmd replays the snapshot if present, else falls back to
-// `swapon -a` (re-enable fstab swap). Either way it never fails the run.
-const nsenter1RestoreCmd = "if [ -s " + swapStateFile + " ]; then " +
+// `swapon -a` (re-enable fstab swap). swapon is tolerant; the marker confirms it ran.
+const nsenter1RestoreCmd = "set -e\n" +
+	"export PATH=/sbin:/usr/sbin:/bin:/usr/bin\n" +
+	"if [ -s " + swapStateFile + " ]; then " +
 	"while IFS= read -r d; do swapon \"$d\" 2>/dev/null || true; done < " + swapStateFile + "; " +
-	"else swapon -a 2>/dev/null || true; fi"
+	"else swapon -a 2>/dev/null || true; fi\n" +
+	"echo " + hostPrepMarker
 
 // prepDockerDesktop runs a short-lived privileged container joined to the
 // Docker Desktop VM's PID 1 namespace so it can swapoff/modprobe (or restore
@@ -71,7 +87,7 @@ func prepDockerDesktop(ctx context.Context, dk *Docker, restore bool) error {
 	fmt.Printf("  image: %s\n", nsenter1Image)
 	fmt.Printf("  cmd:   %s\n", cmdStr)
 	if !hostPrepRun {
-		fmt.Println("(plan only — re-run with --run to execute)")
+		fmt.Println("(plan only — nothing was executed; re-run with --run to apply)")
 		return nil
 	}
 	cli := dk.c
@@ -82,8 +98,10 @@ func prepDockerDesktop(ctx context.Context, dk *Docker, restore bool) error {
 	_ = cli.ContainerRemove(ctx, "vabbe-host-prep", container.RemoveOptions{Force: true})
 	created, err := cli.ContainerCreate(ctx,
 		&container.Config{
-			Image:        nsenter1Image,
-			Cmd:          []string{"sh", "-c", cmdStr},
+			Image: nsenter1Image,
+			// Absolute path: nsenter1 execs the command in the VM PID1 namespace
+			// without PATH resolution, so a bare "sh" fails with ENOENT.
+			Cmd:          []string{"/bin/sh", "-c", cmdStr},
 			AttachStdout: true,
 			AttachStderr: true,
 		},
@@ -106,19 +124,33 @@ func prepDockerDesktop(ctx context.Context, dk *Docker, restore bool) error {
 	if err := cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
 		return fmt.Errorf("start helper: %w", err)
 	}
+	var out bytes.Buffer
 	if logs, err := cli.ContainerLogs(ctx, created.ID, container.LogsOptions{
 		ShowStdout: true, ShowStderr: true, Follow: true,
 	}); err == nil {
-		_, _ = io.Copy(os.Stdout, logs)
+		// Demux the multiplexed (non-TTY) stream and capture it so we can both
+		// show it and check the completion marker.
+		_, _ = stdcopy.StdCopy(&out, &out, logs)
 		_ = logs.Close()
 	}
+	var code int64
 	select {
 	case status := <-statusC:
-		if status.StatusCode != 0 {
-			return fmt.Errorf("helper exited with code %d", status.StatusCode)
-		}
+		code = status.StatusCode
 	case err := <-errC:
 		return err
+	}
+	// Show the helper output (minus the marker line).
+	if shown := strings.TrimSpace(strings.ReplaceAll(out.String(), hostPrepMarker, "")); shown != "" {
+		fmt.Println(shown)
+	}
+	if code != 0 {
+		return fmt.Errorf("host-prep helper exited with code %d (see output above)", code)
+	}
+	// The marker is missing if the shell never ran (e.g. exec failure) — do not
+	// claim success when nothing happened.
+	if !strings.Contains(out.String(), hostPrepMarker) {
+		return fmt.Errorf("host-prep helper did not run to completion; the VM PID1 namespace may not have executed the command")
 	}
 	if restore {
 		fmt.Println("✓ swap restored on Docker Desktop VM.")
