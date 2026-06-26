@@ -1,7 +1,7 @@
 <!-- markdownlint-disable MD033 MD041 -->
 <h1 align="center">
   <img alt="vabbe logo" src="docs/images/logo.png" width="200"><br/>
-  vabbe
+  vabbè
 </h1>
 <!-- markdownlint-enable MD033 MD041 -->
 
