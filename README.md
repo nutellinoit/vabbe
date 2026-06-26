@@ -1,4 +1,9 @@
-# vabbe
+<!-- markdownlint-disable MD033 MD041 -->
+<h1 align="center">
+  <img alt="vabbe logo" src="docs/images/logo.png" width="200"><br/>
+  vabbe
+</h1>
+<!-- markdownlint-enable MD033 MD041 -->
 
 > *vabbè* — Italian for *"eh, whatever, fine."* Making VMs out of containers is an antipattern. We know. But it's **good enough** for throwaway test environments, so — *vabbè*.
 
