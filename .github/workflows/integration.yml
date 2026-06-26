@@ -1,0 +1,38 @@
+name: Integration (Docker)
+
+# Builds the node image from this commit's Dockerfile and runs the VABBE_IT
+# integration test against it. Self-contained (no registry), so it runs on every
+# branch push, on release tags, and on PRs — validating the CLI + image of that
+# exact commit before anything is published.
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: Docker integration test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up mise
+        uses: jdx/mise-action@v3
+        with:
+          install: true
+          cache: true
+
+      - name: Build node image (local, single-arch)
+        run: docker build -t vabbe-node:ci cmd/vabbe/image
+
+      - name: Run integration test
+        env:
+          VABBE_IT_IMAGE: vabbe-node:ci
+        run: mise run test-it
