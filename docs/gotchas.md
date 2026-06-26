@@ -125,6 +125,10 @@ declares `VOLUME ["/var/lib/containerd"]` (Docker auto-creates an anonymous
 volume). `kind` does the same for its node `/var`. For VM nodes you can also
 add it explicitly via `mounts:` if you want a named volume.
 
+`vabbe down` (and `up --recreate`) remove the container **with** its anonymous
+volumes (`RemoveVolumes`), so these don't pile up as dangling volumes — the
+pulled-image cache is throwaway, like the lab.
+
 ## 11. Reboots work, but `ansible.builtin.reboot` needs help
 
 A "reboot" inside a node works mechanically: systemd calls `reboot(2)` (needs

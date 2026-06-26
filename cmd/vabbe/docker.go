@@ -94,7 +94,7 @@ func (d *Docker) EnsureNode(ctx context.Context, lab *Lab, node *Node, pubKeyPat
 	}
 	if recreate {
 		if drift := d.drift(ctx, lab, node, existing.ID); len(drift) > 0 {
-			if err := d.c.ContainerRemove(ctx, existing.ID, container.RemoveOptions{Force: true}); err != nil {
+			if err := d.c.ContainerRemove(ctx, existing.ID, container.RemoveOptions{Force: true, RemoveVolumes: true}); err != nil {
 				return nil, false, fmt.Errorf("recreate %s: %w", node.Name, err)
 			}
 			return drift, true, d.createNode(ctx, lab, node, pubKeyPath)
@@ -386,7 +386,7 @@ func (d *Docker) Down(ctx context.Context, lab *Lab, keepNet bool) ([]string, er
 	}
 	for _, c := range cs {
 		name := strings.TrimPrefix(c.Names[0], "/")
-		if err := d.c.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil {
+		if err := d.c.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true, RemoveVolumes: true}); err != nil {
 			return removed, fmt.Errorf("remove %s: %w", name, err)
 		}
 		removed = append(removed, name)
