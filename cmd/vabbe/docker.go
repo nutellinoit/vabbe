@@ -78,15 +78,19 @@ func (d *Docker) findNetwork(ctx context.Context, name string) (bool, error) {
 	return len(nws) > 0, nil
 }
 
-func (d *Docker) EnsureNode(ctx context.Context, lab *Lab, node *Node, pubKeyPath string) error {
+// EnsureNode creates the node if missing, otherwise reconciles it. The returned
+// strings are config-drift warnings: fields whose desired value differs from the
+// running container. We only warn (not recreate) because labs are throwaway and
+// `down`/`up` is the cheap, unambiguous way to apply such changes.
+func (d *Docker) EnsureNode(ctx context.Context, lab *Lab, node *Node, pubKeyPath string) ([]string, error) {
 	existing, err := d.findContainer(ctx, lab.Name, node.Name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if existing != nil {
 		return d.reconcile(ctx, lab, node, existing)
 	}
-	return d.createNode(ctx, lab, node, pubKeyPath)
+	return nil, d.createNode(ctx, lab, node, pubKeyPath)
 }
 
 func (d *Docker) createNode(ctx context.Context, lab *Lab, node *Node, pubKeyPath string) error {
@@ -171,17 +175,18 @@ func (d *Docker) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
-func (d *Docker) reconcile(ctx context.Context, lab *Lab, node *Node, existing *container.Summary) error {
+func (d *Docker) reconcile(ctx context.Context, lab *Lab, node *Node, existing *container.Summary) ([]string, error) {
 	if existing.State != "running" {
 		if err := d.c.ContainerStart(ctx, existing.ID, container.StartOptions{}); err != nil {
-			return fmt.Errorf("restart %s: %w", node.Name, err)
+			return nil, fmt.Errorf("restart %s: %w", node.Name, err)
 		}
 	}
 	ep, ok := existing.NetworkSettings.Networks[lab.Name]
 	if !ok || ep == nil {
-		return d.c.NetworkConnect(ctx, lab.Name, existing.ID, &network.EndpointSettings{
+		err := d.c.NetworkConnect(ctx, lab.Name, existing.ID, &network.EndpointSettings{
 			IPAMConfig: &network.EndpointIPAMConfig{IPv4Address: node.IP},
 		})
+		return nil, err
 	}
 	cur := ""
 	if ep.IPAMConfig != nil {
@@ -192,11 +197,100 @@ func (d *Docker) reconcile(ctx context.Context, lab *Lab, node *Node, existing *
 	}
 	if cur != node.IP {
 		_ = d.c.NetworkDisconnect(ctx, lab.Name, existing.ID, true)
-		return d.c.NetworkConnect(ctx, lab.Name, existing.ID, &network.EndpointSettings{
+		err := d.c.NetworkConnect(ctx, lab.Name, existing.ID, &network.EndpointSettings{
 			IPAMConfig: &network.EndpointIPAMConfig{IPv4Address: node.IP},
 		})
+		return nil, err
 	}
-	return nil
+	return d.drift(ctx, lab, node, existing.ID), nil
+}
+
+// drift reports config fields whose desired value differs from the running
+// container. Best-effort: an inspect failure yields no warnings rather than
+// blocking `up`. It compares only fields a user changes intentionally and that
+// compare unambiguously, to avoid false positives that would cry wolf.
+func (d *Docker) drift(ctx context.Context, lab *Lab, node *Node, id string) []string {
+	info, err := d.c.ContainerInspect(ctx, id)
+	if err != nil {
+		return nil
+	}
+	var r []string
+	if info.Config != nil {
+		if info.Config.Image != node.Image {
+			r = append(r, fmt.Sprintf("image (%s → %s)", info.Config.Image, node.Image))
+		}
+		if len(node.Entrypoint) > 0 && !strSliceEqual(info.Config.Entrypoint, node.Entrypoint) {
+			r = append(r, "entrypoint")
+		}
+		if len(node.Cmd) > 0 && !strSliceEqual(info.Config.Cmd, node.Cmd) {
+			r = append(r, "cmd")
+		}
+		for k, v := range node.Env {
+			if !envHas(info.Config.Env, k, v) {
+				r = append(r, "env "+k)
+			}
+		}
+	}
+	if info.HostConfig != nil {
+		want := node.Privileged != nil && *node.Privileged
+		if info.HostConfig.Privileged != want {
+			r = append(r, fmt.Sprintf("privileged (%t → %t)", info.HostConfig.Privileged, want))
+		}
+		for _, m := range node.Mounts {
+			if !sliceContains(info.HostConfig.Binds, absBind(lab.Dir(), m)) {
+				r = append(r, "mount "+strings.SplitN(m, ":", 2)[0])
+			}
+		}
+		for _, p := range node.Ports {
+			if !portBound(info.HostConfig.PortBindings, p) {
+				r = append(r, "port "+p)
+			}
+		}
+	}
+	sort.Strings(r)
+	return r
+}
+
+func strSliceEqual(a strslice.StrSlice, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func envHas(env []string, k, v string) bool {
+	want := k + "=" + v
+	for _, e := range env {
+		if e == want {
+			return true
+		}
+	}
+	return false
+}
+
+func sliceContains(s []string, v string) bool {
+	for _, e := range s {
+		if e == v {
+			return true
+		}
+	}
+	return false
+}
+
+// portBound reports whether the desired "host:container" (or bare "port") spec
+// already has a matching binding in the running container.
+func portBound(pm nat.PortMap, spec string) bool {
+	for want := range parsePortBindings([]string{spec}) {
+		if _, ok := pm[want]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (d *Docker) findContainer(ctx context.Context, labName, nodeName string) (*container.Summary, error) {

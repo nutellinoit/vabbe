@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/spf13/cobra"
@@ -28,10 +29,14 @@ var upCmd = &cobra.Command{
 		fmt.Printf("lab %q on subnet %s\n", lab.Name, lab.Network.Subnet)
 		for i := range lab.Nodes {
 			n := &lab.Nodes[i]
-			if err := dk.EnsureNode(ctx, lab, n, pub); err != nil {
+			warns, err := dk.EnsureNode(ctx, lab, n, pub)
+			if err != nil {
 				return err
 			}
 			fmt.Printf("  ✓ %s %s (%s)\n", n.Name, n.IP, n.Image)
+			if len(warns) > 0 {
+				fmt.Printf("    ! config changed (%s): run `vabbe down`/`up` to apply\n", strings.Join(warns, ", "))
+			}
 		}
 		return nil
 	},
