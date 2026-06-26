@@ -43,5 +43,18 @@ run = "goreleaser release --snapshot --clean"
 [tasks.ci]
 depends = ["fmt-check", "lint", "test", "build"]
 
+# Docker integration test (real daemon + node image). Opt-in via VABBE_IT so it
+# never runs as part of `mise run test`/`ci`. Override the image with VABBE_IT_IMAGE.
+[tasks.test-it]
+run = "VABBE_IT=1 go test ./cmd/vabbe -run TestIntegrationLab -v -timeout 5m"
+
+# Same as test-it but builds the node image from this checkout first and tests
+# against it — no registry needed. Mirrors the integration CI workflow.
+[tasks.test-it-local]
+run = """
+docker build -t vabbe-node:ci cmd/vabbe/image
+VABBE_IT=1 VABBE_IT_IMAGE=vabbe-node:ci go test ./cmd/vabbe -run TestIntegrationLab -v -timeout 5m
+"""
+
 [tasks.coverage]
 run = "go test -cover ./..."
