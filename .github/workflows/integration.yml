@@ -17,8 +17,12 @@ permissions:
 
 jobs:
   integration:
-    name: Docker integration test
+    name: Docker integration test (${{ matrix.base }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        base: [ubuntu, rocky]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -30,7 +34,7 @@ jobs:
           cache: true
 
       - name: Build node image (local, single-arch)
-        run: docker build -t vabbe-node:ci cmd/vabbe/image
+        run: docker build -t vabbe-node:ci -f cmd/vabbe/image/${{ matrix.base }}/Dockerfile cmd/vabbe/image
 
       - name: Run integration test
         env:

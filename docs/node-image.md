@@ -1,16 +1,36 @@
 # The vabbe node image
 
-`ghcr.io/nutellinoit/vabbe-node:24.04` is a known-good VM base for `vabbe`.
-Build it locally with:
+`vabbe-node` ships in two flavors — a Debian-family **Ubuntu** base (the default)
+and a RHEL-family **Rocky** base — so you can test against either package
+manager. Build one locally with:
 
 ```
-vabbe image build --tag <your-tag>
+vabbe image build --base ubuntu --tag <your-tag>   # default
+vabbe image build --base rocky  --tag <your-tag>
 ```
 
-(The same `cmd/vabbe/image/Dockerfile` is embedded in the binary and built via the
-Docker Engine API `ImageBuild` call — no shell-out to `docker buildx`.)
+The per-base Dockerfiles live at `cmd/vabbe/image/<base>/Dockerfile`, are
+embedded in the binary, and are built via the Docker Engine API `ImageBuild`
+call — no shell-out to `docker buildx`.
+
+## Published tags
+
+Each `v*` tag publishes both bases to GHCR:
+
+| Tag pattern | Example | Base |
+|---|---|---|
+| `:ubuntu`, `:ubuntu-vX.Y.Z`, `:ubuntu-rc` | `:ubuntu-v0.0.2` | Ubuntu |
+| `:rocky`, `:rocky-vX.Y.Z`, `:rocky-rc` | `:rocky-v0.0.2` | Rocky |
+| `:24.04`, `:latest`, `:rc`, `:vX.Y.Z` (legacy, **= Ubuntu**) | `:24.04` | Ubuntu |
+
+The unprefixed legacy tags always point at the Ubuntu base so existing labs keep
+working; `defaults.image` defaults to `:24.04`.
 
 ## What it ships and why
+
+Packages below are the **Ubuntu** set; the Rocky base installs the dnf
+equivalents (`iproute`, `iputils`, `python3-dnf`, `openssh-clients`, …) and
+enables `sshd` instead of `ssh`.
 
 | Package(s) | Why |
 |---|---|

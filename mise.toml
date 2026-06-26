@@ -49,10 +49,12 @@ depends = ["fmt-check", "lint", "test", "build"]
 run = "VABBE_IT=1 go test ./cmd/vabbe -run TestIntegrationLab -v -timeout 5m"
 
 # Same as test-it but builds the node image from this checkout first and tests
-# against it — no registry needed. Mirrors the integration CI workflow.
+# against it — no registry needed. Mirrors the integration CI workflow. Pick the
+# base with VABBE_BASE (ubuntu|rocky), default ubuntu.
 [tasks.test-it-local]
 run = """
-docker build -t vabbe-node:ci cmd/vabbe/image
+base="${VABBE_BASE:-ubuntu}"
+docker build -t vabbe-node:ci -f cmd/vabbe/image/$base/Dockerfile cmd/vabbe/image
 VABBE_IT=1 VABBE_IT_IMAGE=vabbe-node:ci go test ./cmd/vabbe -run TestIntegrationLab -v -timeout 5m
 """
 
