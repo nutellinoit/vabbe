@@ -9,6 +9,8 @@
 
 `vabbe` spins up Docker containers that act like throwaway VMs (systemd + sshd, static IPs on a network you define) for testing installers — like `kind`, but the nodes are generic VMs instead of a k8s cluster.
 
+Tested on **Linux with Docker** and **macOS with Docker Desktop**.
+
 ## Install
 
 ```
