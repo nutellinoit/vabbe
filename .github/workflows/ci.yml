@@ -1,4 +1,4 @@
-name: ci
+name: Branch checks
 
 on:
   push:
@@ -12,7 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  ci:
+  validate-go-cli:
+    name: Validate Go CLI
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

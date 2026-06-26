@@ -1,4 +1,4 @@
-name: cross
+name: Cross-platform CLI build
 
 on:
   push:
@@ -12,7 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  cross:
+  build-cli-artifacts:
+    name: Build CLI artifacts (no release)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

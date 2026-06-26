@@ -24,7 +24,8 @@ mise run release      # goreleaser release --clean (needs a tag)
 `checksums.txt`. `release.prerelease: auto` means `vX.Y.Z-rc.N` creates a
 GitHub prerelease, while `vX.Y.Z` creates a normal release.
 
-Release workflows only publish from tags that point to `main`:
+Release workflows publish from any pushed `v*` tag, including RC tags from a
+feature/release branch:
 
 ```bash
 git tag v0.1.0-rc.1

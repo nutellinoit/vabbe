@@ -1,4 +1,4 @@
-name: image-check
+name: Node image build check
 
 on:
   push:
@@ -18,7 +18,8 @@ permissions:
   contents: read
 
 jobs:
-  image-check:
+  build-node-image:
+    name: Build node image (no push)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
