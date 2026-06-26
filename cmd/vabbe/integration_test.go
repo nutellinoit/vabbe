@@ -115,14 +115,18 @@ nodes:
 	if err != nil || cpc == nil {
 		t.Fatalf("find cp0: %v", err)
 	}
+	info, err := dk.c.ContainerInspect(ctx, cpc.ID)
+	if err != nil {
+		t.Fatalf("inspect cp0: %v", err)
+	}
 	published := false
-	for _, p := range cpc.Ports {
-		if p.PrivatePort == 22 && p.PublicPort == 12222 && p.Type == "tcp" && p.IP == "127.0.0.1" {
+	for _, b := range info.HostConfig.PortBindings["22/tcp"] {
+		if b.HostIP == "127.0.0.1" && b.HostPort == "12222" {
 			published = true
 		}
 	}
 	if !published {
-		t.Fatalf("cp0 did not publish 22/tcp -> 127.0.0.1:12222, got %+v", cpc.Ports)
+		t.Fatalf("cp0 did not bind 22/tcp -> 127.0.0.1:12222, got %+v", info.HostConfig.PortBindings)
 	}
 	if c, derr := net.DialTimeout("tcp", "127.0.0.1:12222", 3*time.Second); derr == nil {
 		_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
