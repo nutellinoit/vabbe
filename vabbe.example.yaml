@@ -1,0 +1,14 @@
+name: onprem
+network: { subnet: 10.10.1.0/24 }
+defaults: { image: ghcr.io/nutellinoit/vabbe-node:24.04, privileged: true }
+nodes:
+  - { name: haproxy, ip: 10.10.1.2, caps: [NET_ADMIN, NET_RAW] }
+  - { name: cp0,     ip: 10.10.1.3 }
+  - { name: worker0, ip: 10.10.1.9 }
+  - name: runner
+    ip: 10.10.1.250
+    image: jdxcode/mise:latest
+    entrypoint: ["/bin/sleep", "infinity"]
+    runner: true
+    mounts: ["./:/workspace"]
+    env: { GITHUB_TOKEN: "${GITHUB_TOKEN}" }
