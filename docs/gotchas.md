@@ -84,10 +84,14 @@ kubeadm's swap preflight and ansible "disable swap" tasks fire — and
 `swapoff -a` inside the node **fails** (`rc=32`) because the container can't
 turn off the host's swap, even when privileged.
 
-**Fix:** run `vabbe host-prep` once before `vabbe up`:
-- Linux: `sudo swapoff -a`.
-- Docker Desktop: a privileged helper container with `--pid=host` enters the
-  VM's PID 1 namespace and runs `swapoff -a` on the VM kernel.
+**Fix:** run `vabbe host-prep` once before `vabbe up`. By default it only
+**prints the plan** — add `--run` to execute:
+- Linux: `sudo vabbe host-prep --run` runs `swapoff -a` + `modprobe`s directly.
+  It never invokes `sudo` for you, and `--run` requires root. Undo with
+  `sudo vabbe host-prep --restore --run`.
+- Docker Desktop: `vabbe host-prep --run` starts a privileged helper with
+  `--pid=host` that enters the VM's PID 1 namespace and runs `swapoff -a` on the
+  VM kernel (no host sudo).
 
 `vabbe` does **not** do this automatically during `up` — host-prep is opt-in,
 loud, and never surprises you on a shared host. `vabbe doctor` reminds you to
@@ -153,6 +157,7 @@ a real VM reboot, so prefer the tmpfs token.)
 Anything kernel-level (swap, modules, sysctls) must be arranged on the **host
 kernel**, not the node — a container-as-VM shares the host kernel. `vabbe
 host-prep` is that phase: on Docker Desktop it uses the `nsenter1` trick; on
-Linux it runs `sudo swapoff -a` + the needed `modprobe`s directly. It's
-opt-out by being an explicit command (never runs during `up`), and it prints
-every command it runs.
+Linux it runs `swapoff -a` + the needed `modprobe`s directly (run it as root —
+it never calls `sudo` itself). It's safe by default: it only **prints the plan**
+unless you pass `--run`, never runs during `up`, prints every command, and can
+be undone with `--restore`.
