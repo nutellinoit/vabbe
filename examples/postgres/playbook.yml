@@ -9,6 +9,8 @@
       ansible.builtin.apt:
         name: [postgresql, python3-psycopg2]
         update_cache: true
+        update_cache_retries: 10
+        update_cache_retry_max_delay: 30
 
 # Primary: listen on all interfaces, allow replication from the lab subnet, and
 # create the replication role.
