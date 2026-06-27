@@ -37,5 +37,4 @@ mise trust && mise run test
 | --- | --- | --- | --- |
 | [nginx](nginx/) | 1 | `geerlingguy.nginx` | the minimal end-to-end loop |
 | [redis](redis/) | 3 | `geerlingguy.redis` | primary + 2 replicas (replication) |
-| [postgres](postgres/) | 2 | `geerlingguy.postgresql` | primary + replica (streaming replication) |
-| [kafka](kafka/) | 3 | community Kafka role | 3-node KRaft cluster (advanced, heavier) |
+| [postgres](postgres/) | 2 | distro PostgreSQL + `community.postgresql` | primary + replica (streaming replication) |
