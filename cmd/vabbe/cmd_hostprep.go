@@ -22,7 +22,19 @@ var (
 
 var hostPrepCmd = &cobra.Command{
 	Use:   "host-prep",
-	Short: "Disable swap + ensure kernel modules on the host/VM (Linux or Docker Desktop)",
+	Short: "Prepare the shared host/VM kernel for Kubernetes (swap off + kernel modules)",
+	Long: `Prepare the shared host/VM kernel for Kubernetes-style installers.
+
+vabbe nodes are containers that share ONE kernel, but kubeadm has kernel-global
+prerequisites that can't be set per node: swap must be off, a few modules
+(ip_vs*, br_netfilter, overlay, nf_conntrack) must be loaded, and inotify limits
+raised. host-prep arranges these once — on the host (Linux) or the Docker
+Desktop VM.
+
+It is the only command that touches the real host kernel, so it never runs during
+'up': it prints a plan by default and only executes with --run (root on Linux).
+Undo the swap change with --restore. If you're not running Kubernetes, you most
+likely don't need it. See docs/host-prep.md for the why.`,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		dk, err := NewDocker()
 		if err != nil {
@@ -64,6 +76,8 @@ const nsenter1PrepCmd = "set -e\n" +
 	"swapon --show=NAME --noheadings > " + swapStateFile + " 2>/dev/null || true\n" +
 	"swapoff -a\n" +
 	"modprobe ip_vs ip_vs_rr ip_vs_wrr ip_vs_sh nf_conntrack br_netfilter overlay 2>/dev/null || true\n" +
+	"sysctl -w fs.inotify.max_user_watches=524288 2>/dev/null || true\n" +
+	"sysctl -w fs.inotify.max_user_instances=8192 2>/dev/null || true\n" +
 	"echo " + hostPrepMarker
 
 // nsenter1RestoreCmd replays the snapshot if present, else falls back to
@@ -185,6 +199,10 @@ func prepLinux(restore bool) error {
 		{"modprobe", "nf_conntrack"},
 		{"modprobe", "br_netfilter"},
 		{"modprobe", "overlay"},
+		// inotify limits are host-global (not namespaced); raise them so many
+		// pods don't hit "too many open files".
+		{"sysctl", "-w", "fs.inotify.max_user_watches=524288"},
+		{"sysctl", "-w", "fs.inotify.max_user_instances=8192"},
 	} {
 		runCmd(c)
 	}
