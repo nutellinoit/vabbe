@@ -3,5 +3,11 @@
 # is the lab name (see `vabbe inventory`).
 - hosts: ex-nginx
   become: true
+  pre_tasks:
+    # The vabbe node image ships with no apt lists, so refresh before installing.
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+      changed_when: false
   roles:
     - geerlingguy.nginx
