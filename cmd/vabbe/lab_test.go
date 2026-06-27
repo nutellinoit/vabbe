@@ -98,6 +98,35 @@ nodes:
 	}
 }
 
+func TestLoadAutoNetwork(t *testing.T) {
+	auto := `
+name: auto
+nodes:
+  - { name: a }
+  - { name: b }
+`
+	p := writeLab(t, t.TempDir(), auto)
+	lab, err := Load(p)
+	if err != nil {
+		t.Fatalf("auto network/ip should load: %v", err)
+	}
+	if lab.Network.Subnet != "" || lab.Nodes[0].IP != "" {
+		t.Errorf("expected empty subnet/ip, got subnet=%q ip=%q", lab.Network.Subnet, lab.Nodes[0].IP)
+	}
+}
+
+func TestLoadRejectsIPWithoutSubnet(t *testing.T) {
+	bad := `
+name: bad
+nodes:
+  - { name: a, ip: 10.10.1.2 }
+`
+	p := writeLab(t, t.TempDir(), bad)
+	if _, err := Load(p); err == nil {
+		t.Fatal("expected error: ip set without a subnet")
+	}
+}
+
 func TestLoadRejectsIPNotInSubnet(t *testing.T) {
 	dir := t.TempDir()
 	bad := `

@@ -3,14 +3,17 @@
 ```yaml
 name: <lab-name>            # required; becomes the Docker network name and the vabbe.lab label
 network:
-  subnet: <CIDR>            # required; e.g. 10.10.1.0/24 — static IPs must fall inside it
+  subnet: <CIDR>            # optional; e.g. 10.10.1.0/24. Omit it to let Docker pick a free
+                            # subnet automatically (no collisions across parallel labs — good
+                            # for CI). With a subnet, static node ips must fall inside it.
 defaults:                   # optional, applied to every node before the node's own fields
   image: <image>
   privileged: <bool>
   dns: [<ip>...]            # optional; node resolv.conf upstreams (default [1.1.1.1, 1.0.0.1])
 nodes:                      # at least one
   - name: <node-name>       # required; becomes the container hostname unless `hostname` is set
-    ip: <ipv4>              # required; must be in `network.subnet`, unique across the lab
+    ip: <ipv4>              # optional; static IP (needs network.subnet). Omit for a Docker-
+                            # assigned IP — discover it with `vabbe ip`/`inventory`/`dns`/`ls`.
     image: <image>          # optional; falls back to defaults.image, then the vabbe default
     privileged: <bool>      # optional; defaults true (defaults to true)
     dns: [<ip>...]          # optional; overrides defaults.dns for this node
