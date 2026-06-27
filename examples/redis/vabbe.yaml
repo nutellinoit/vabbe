@@ -3,6 +3,9 @@ network: { subnet: 10.151.1.0/24 }
 defaults:
   image: ${VABBE_NODE_IMAGE}
   privileged: true
+  # Use Docker's embedded resolver (forwards to the host's DNS) — reliable
+  # everywhere incl. CI. These labs run no pods, so no public upstream is needed.
+  dns: ["127.0.0.11"]
 nodes:
   - { name: redis-primary, ip: 10.151.1.10 }
   - { name: redis-r1, ip: 10.151.1.11 }
