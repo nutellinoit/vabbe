@@ -6,7 +6,7 @@ uv = "latest"
 [env]
 ANSIBLE_HOST_KEY_CHECKING = "False"
 # Overridable so CI can point the lab at a locally-built node image.
-VABBE_NODE_IMAGE = "ghcr.io/nutellinoit/vabbe-node:v0.1.3"
+VABBE_NODE_IMAGE = "{{ env.VABBE_NODE_IMAGE | default(value='ghcr.io/nutellinoit/vabbe-node:v0.1.3') }}"
 
 [tasks.deps]
 run = """

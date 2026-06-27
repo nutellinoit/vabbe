@@ -5,6 +5,8 @@ uv = "latest"
 
 [env]
 ANSIBLE_HOST_KEY_CHECKING = "False"
+# Overridable so CI can point the lab at a locally-built node image.
+VABBE_NODE_IMAGE = "{{ env.VABBE_NODE_IMAGE | default(value='ghcr.io/nutellinoit/vabbe-node:v0.1.3') }}"
 
 # Install ansible-core (pinned python via uv) into a local venv, plus the Galaxy role.
 [tasks.deps]

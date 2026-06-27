@@ -1,0 +1,54 @@
+name: Examples
+
+# Run each example end-to-end (vabbe + Ansible community roles) against a node
+# image built from this commit, so the examples stay working as vabbe evolves.
+# Self-contained: builds vabbe-node:ci and points the example labs at it via
+# VABBE_NODE_IMAGE. (kafka is intentionally not here — too heavy for CI.)
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["*"]
+    paths:
+      - "examples/**"
+      - "cmd/vabbe/image/**"
+      - ".github/workflows/examples.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "examples/**"
+      - "cmd/vabbe/image/**"
+      - ".github/workflows/examples.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  example:
+    name: example (${{ matrix.example }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        example: [nginx, redis, postgres]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up mise
+        uses: jdx/mise-action@v3
+        with:
+          install: true
+          cache: true
+
+      - name: Build node image (local, single-arch)
+        run: docker build -t vabbe-node:ci -f cmd/vabbe/image/ubuntu/Dockerfile cmd/vabbe/image
+
+      - name: Run example end-to-end
+        working-directory: examples/${{ matrix.example }}
+        env:
+          VABBE_NODE_IMAGE: vabbe-node:ci
+        run: |
+          mise trust
+          mise install
+          mise run test
