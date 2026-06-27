@@ -1,0 +1,35 @@
+---
+# The vabbe node image ships with no apt lists (kept small), so refresh the
+# cache before any role installs packages.
+- hosts: ex-redis
+  become: true
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+      changed_when: false
+
+# Install Redis on every node with the community role, bound to all interfaces
+# so replicas can reach the primary across the lab network.
+- hosts: ex-redis
+  become: true
+  vars:
+    redis_bind_interface: 0.0.0.0
+  roles:
+    - geerlingguy.redis
+
+# Wire up replication (the role doesn't, in this version). Throwaway lab → no
+# auth, so disable protected mode and point replicas at the primary at runtime.
+- hosts: ex-redis
+  become: true
+  tasks:
+    - name: Allow cross-node connections
+      ansible.builtin.command: redis-cli config set protected-mode no
+      changed_when: true
+
+- hosts: redis-r1,redis-r2
+  become: true
+  tasks:
+    - name: Make this node a replica of the primary
+      ansible.builtin.command: redis-cli replicaof 10.151.1.10 6379
+      changed_when: true
