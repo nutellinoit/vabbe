@@ -34,6 +34,7 @@ var inventoryCmd = &cobra.Command{
 				key = absPath(filepath.Join(lab.VabbeDir(), "id_ed25519"))
 			}
 		}
+		addr := nodeAddrResolver(lab)
 		var b strings.Builder
 		fmt.Fprintf(&b, "[%s]\n", lab.Name)
 		for i := range lab.Nodes {
@@ -41,7 +42,11 @@ var inventoryCmd = &cobra.Command{
 			if n.Runner {
 				continue // runners are the ansible controller, not a target
 			}
-			fmt.Fprintf(&b, "%s ansible_host=%s\n", n.Name, n.IP)
+			ip, err := addr(n)
+			if err != nil {
+				return fmt.Errorf("node %q address: %w (is the lab up?)", n.Name, err)
+			}
+			fmt.Fprintf(&b, "%s ansible_host=%s\n", n.Name, ip)
 		}
 		fmt.Fprintf(&b, "\n[%s:vars]\n", lab.Name)
 		fmt.Fprintf(&b, "ansible_user=root\n")

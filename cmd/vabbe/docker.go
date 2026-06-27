@@ -57,22 +57,27 @@ func (d *Docker) EnsureNetwork(ctx context.Context, lab *Lab) error {
 		if nw.Labels[labelLab] != lab.Name {
 			return fmt.Errorf("network %q already exists and is not managed by vabbe (missing %s label); rename the lab or remove that network", lab.Name, labelLab)
 		}
-		if cur := networkSubnet(nw); cur != "" && cur != lab.Network.Subnet {
+		// Only enforce the subnet when the config pins one (empty = Docker auto).
+		if cur := networkSubnet(nw); lab.Network.Subnet != "" && cur != lab.Network.Subnet {
 			return fmt.Errorf("network %q exists with subnet %s but config wants %s; run `vabbe down` first", lab.Name, cur, lab.Network.Subnet)
 		}
 		return nil
 	} else if !cerrdefs.IsNotFound(err) {
 		return fmt.Errorf("inspect network %s: %w", lab.Name, err)
 	}
-	_, err := d.c.NetworkCreate(ctx, lab.Name, network.CreateOptions{
+	opts := network.CreateOptions{
 		Driver: "bridge",
-		IPAM: &network.IPAM{
+		Labels: map[string]string{labelLab: lab.Name},
+	}
+	// Pin the subnet only if the config asks for one; otherwise Docker picks a
+	// free subnet (avoids collisions across parallel labs on one host).
+	if lab.Network.Subnet != "" {
+		opts.IPAM = &network.IPAM{
 			Driver: "default",
 			Config: []network.IPAMConfig{{Subnet: lab.Network.Subnet}},
-		},
-		Labels: map[string]string{labelLab: lab.Name},
-	})
-	if err != nil {
+		}
+	}
+	if _, err := d.c.NetworkCreate(ctx, lab.Name, opts); err != nil {
 		return fmt.Errorf("create network %s: %w", lab.Name, err)
 	}
 	return nil
@@ -210,9 +215,7 @@ func (d *Docker) createNode(ctx context.Context, lab *Lab, node *Node, pubKeyPat
 	}
 	created, err := d.c.ContainerCreate(ctx, cc, hc,
 		&network.NetworkingConfig{
-			EndpointsConfig: map[string]*network.EndpointSettings{
-				lab.Name: {IPAMConfig: &network.EndpointIPAMConfig{IPv4Address: node.IP}},
-			},
+			EndpointsConfig: map[string]*network.EndpointSettings{lab.Name: endpointFor(node)},
 		},
 		nil,
 		lab.Name+"."+node.Name,
@@ -249,26 +252,52 @@ func (d *Docker) reconcile(ctx context.Context, lab *Lab, node *Node, existing *
 	}
 	ep, ok := existing.NetworkSettings.Networks[lab.Name]
 	if !ok || ep == nil {
-		err := d.c.NetworkConnect(ctx, lab.Name, existing.ID, &network.EndpointSettings{
-			IPAMConfig: &network.EndpointIPAMConfig{IPv4Address: node.IP},
-		})
-		return nil, err
+		return nil, d.c.NetworkConnect(ctx, lab.Name, existing.ID, endpointFor(node))
 	}
-	cur := ""
-	if ep.IPAMConfig != nil {
-		cur = strings.TrimSpace(ep.IPAMConfig.IPv4Address)
-	}
-	if cur == "" {
-		cur = strings.TrimSpace(ep.IPAddress)
-	}
-	if cur != node.IP {
-		_ = d.c.NetworkDisconnect(ctx, lab.Name, existing.ID, true)
-		err := d.c.NetworkConnect(ctx, lab.Name, existing.ID, &network.EndpointSettings{
-			IPAMConfig: &network.EndpointIPAMConfig{IPv4Address: node.IP},
-		})
-		return nil, err
+	// Only enforce a specific IP when the node pins one; auto IPs are left as-is.
+	if node.IP != "" {
+		cur := ""
+		if ep.IPAMConfig != nil {
+			cur = strings.TrimSpace(ep.IPAMConfig.IPv4Address)
+		}
+		if cur == "" {
+			cur = strings.TrimSpace(ep.IPAddress)
+		}
+		if cur != node.IP {
+			_ = d.c.NetworkDisconnect(ctx, lab.Name, existing.ID, true)
+			return nil, d.c.NetworkConnect(ctx, lab.Name, existing.ID, endpointFor(node))
+		}
 	}
 	return d.drift(ctx, lab, node, existing.ID), nil
+}
+
+// nodeAddrResolver returns a closure giving a node's address: its pinned ip, or
+// the live container IP from Docker for auto-assigned nodes (the client is opened
+// lazily, so an all-static lab needs no running daemon).
+func nodeAddrResolver(lab *Lab) func(*Node) (string, error) {
+	var dk *Docker
+	return func(n *Node) (string, error) {
+		if n.IP != "" {
+			return n.IP, nil
+		}
+		if dk == nil {
+			d, err := NewDocker()
+			if err != nil {
+				return "", err
+			}
+			dk = d
+		}
+		return dk.IP(context.Background(), lab.Name, n.Name)
+	}
+}
+
+// endpointFor builds the network endpoint, pinning the static IP only if set.
+func endpointFor(node *Node) *network.EndpointSettings {
+	ep := &network.EndpointSettings{}
+	if node.IP != "" {
+		ep.IPAMConfig = &network.EndpointIPAMConfig{IPv4Address: node.IP}
+	}
+	return ep
 }
 
 // drift reports config fields whose desired value differs from the running

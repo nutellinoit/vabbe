@@ -29,6 +29,7 @@ var dnsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		addr := nodeAddrResolver(lab)
 		type entry struct{ name, ip, host string }
 		var entries []entry
 		for i := range lab.Nodes {
@@ -36,7 +37,11 @@ var dnsCmd = &cobra.Command{
 			if len(args) == 1 && n.Name != args[0] {
 				continue
 			}
-			entries = append(entries, entry{n.Name, n.IP, zoneHost(n.Name, n.IP, commonDNSZone)})
+			ip, err := addr(n)
+			if err != nil {
+				return fmt.Errorf("node %q address: %w (is the lab up?)", n.Name, err)
+			}
+			entries = append(entries, entry{n.Name, ip, zoneHost(n.Name, ip, commonDNSZone)})
 		}
 		// A custom zone is only useful if it resolves; fail loudly rather than
 		// printing hostnames that point nowhere.

@@ -77,9 +77,6 @@ func Load(path string) (*Lab, error) {
 	if lab.Name == "" {
 		return nil, fmt.Errorf("lab.name is required")
 	}
-	if lab.Network.Subnet == "" {
-		return nil, fmt.Errorf("network.subnet is required")
-	}
 	if len(lab.Nodes) == 0 {
 		return nil, fmt.Errorf("at least one node is required")
 	}
@@ -143,9 +140,15 @@ func (l *Lab) applyDefaults() {
 }
 
 func (l *Lab) validate() error {
-	_, net, err := parseCIDR(l.Network.Subnet)
-	if err != nil {
-		return fmt.Errorf("network.subnet %q: %w", l.Network.Subnet, err)
+	// subnet and per-node ip are optional: omit them to let Docker auto-allocate
+	// (handy for ephemeral CI labs — no subnet collisions across parallel runs).
+	var cidr *net.IPNet
+	if l.Network.Subnet != "" {
+		_, c, err := parseCIDR(l.Network.Subnet)
+		if err != nil {
+			return fmt.Errorf("network.subnet %q: %w", l.Network.Subnet, err)
+		}
+		cidr = c
 	}
 	seenIP := map[string]string{}
 	seenName := map[string]bool{}
@@ -157,12 +160,18 @@ func (l *Lab) validate() error {
 			return fmt.Errorf("duplicate node name %q", n.Name)
 		}
 		seenName[n.Name] = true
+		if n.IP == "" {
+			continue // auto-assigned by Docker
+		}
+		if cidr == nil {
+			return fmt.Errorf("node %q: ip %s set but network.subnet is not — omit the ip for an auto-assigned address, or set the subnet", n.Name, n.IP)
+		}
 		ip := parseIP(n.IP)
 		if ip == nil {
 			return fmt.Errorf("node %q: invalid ip %q", n.Name, n.IP)
 		}
-		if !net.Contains(ip) {
-			return fmt.Errorf("node %q: ip %s not in subnet %s", n.Name, n.IP, net.String())
+		if !cidr.Contains(ip) {
+			return fmt.Errorf("node %q: ip %s not in subnet %s", n.Name, n.IP, cidr.String())
 		}
 		if prev, ok := seenIP[n.IP]; ok {
 			return fmt.Errorf("node %q: ip %s already used by %q", n.Name, n.IP, prev)

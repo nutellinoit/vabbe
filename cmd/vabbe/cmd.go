@@ -34,14 +34,24 @@ var upCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Printf("lab %s on subnet %s\n", bold(lab.Name), lab.Network.Subnet)
+		subnet := lab.Network.Subnet
+		if subnet == "" {
+			subnet = "auto"
+		}
+		fmt.Printf("lab %s on subnet %s\n", bold(lab.Name), subnet)
 		for i := range lab.Nodes {
 			n := &lab.Nodes[i]
 			warns, recreated, err := dk.EnsureNode(ctx, lab, n, pub, upRecreate)
 			if err != nil {
 				return err
 			}
-			fmt.Printf("  %s %s %s (%s)\n", green("✓"), n.Name, n.IP, n.Image)
+			ip := n.IP
+			if ip == "" { // auto-assigned — show the address Docker gave it
+				if a, e := dk.IP(ctx, lab.Name, n.Name); e == nil {
+					ip = a
+				}
+			}
+			fmt.Printf("  %s %s %s (%s)\n", green("✓"), n.Name, ip, n.Image)
 			switch {
 			case recreated:
 				fmt.Printf("    %s recreated (config changed: %s)\n", cyan("~"), strings.Join(warns, ", "))
