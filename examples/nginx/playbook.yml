@@ -1,0 +1,7 @@
+---
+# Install nginx on the web node(s) with the community role. The inventory group
+# is the lab name (see `vabbe inventory`).
+- hosts: ex-nginx
+  become: true
+  roles:
+    - geerlingguy.nginx

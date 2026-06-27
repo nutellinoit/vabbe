@@ -1,0 +1,5 @@
+.venv/
+inventory.ini
+.vabbe/
+.vabbe-cache/
+*.retry

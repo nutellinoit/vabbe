@@ -1,0 +1,8 @@
+name: ex-nginx
+network: { subnet: 10.150.1.0/24 }
+defaults: { image: ghcr.io/nutellinoit/vabbe-node:v0.1.3, privileged: true }
+nodes:
+  - { name: web, ip: 10.150.1.10 }
+# To reach nginx from the host, publish a free port, e.g.:
+#   - { name: web, ip: 10.150.1.10, ports: ["127.0.0.1:8080:80"] }
+
