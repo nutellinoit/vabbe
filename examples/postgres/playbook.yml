@@ -1,0 +1,72 @@
+---
+# Streaming replication, role-free: distro PostgreSQL 16 + ansible.builtin, with
+# the replication user created via the community.postgresql collection. The vabbe
+# node image has no apt lists, so update_cache here.
+- hosts: ex-postgres
+  become: true
+  tasks:
+    - name: Install PostgreSQL + psycopg2 (for community.postgresql modules)
+      ansible.builtin.apt:
+        name: [postgresql, python3-psycopg2]
+        update_cache: true
+
+# Primary: listen on all interfaces, allow replication from the lab subnet, and
+# create the replication role.
+- hosts: pg-primary
+  become: true
+  vars:
+    pg_conf_dir: /etc/postgresql/16/main
+  tasks:
+    - name: Listen on all interfaces
+      ansible.builtin.copy:
+        dest: "{{ pg_conf_dir }}/conf.d/vabbe.conf"
+        content: |
+          listen_addresses = '*'
+          wal_level = replica
+        owner: postgres
+        group: postgres
+        mode: "0644"
+      notify: restart postgresql
+    - name: Allow replication from the lab subnet
+      ansible.builtin.blockinfile:
+        path: "{{ pg_conf_dir }}/pg_hba.conf"
+        block: "host replication replicator 10.152.1.0/24 scram-sha-256"
+      notify: restart postgresql
+    - name: Apply config before creating the role
+      ansible.builtin.meta: flush_handlers
+    - name: Create the replication role
+      community.postgresql.postgresql_user:
+        name: replicator
+        password: replpass
+        role_attr_flags: REPLICATION,LOGIN
+      become_user: postgres
+  handlers:
+    - name: restart postgresql
+      ansible.builtin.service: { name: postgresql, state: restarted }
+
+# Replica: re-seed the data dir from the primary with pg_basebackup so it streams.
+- hosts: pg-replica
+  become: true
+  vars:
+    pg_data: /var/lib/postgresql/16/main
+    primary_ip: 10.152.1.10
+  tasks:
+    - name: Stop postgresql
+      ansible.builtin.service: { name: postgresql, state: stopped }
+    - name: Write .pgpass for the replication user
+      ansible.builtin.copy:
+        dest: /var/lib/postgresql/.pgpass
+        content: "{{ primary_ip }}:5432:*:replicator:replpass\n"
+        owner: postgres
+        group: postgres
+        mode: "0600"
+    - name: Wipe the replica data dir
+      ansible.builtin.file: { path: "{{ pg_data }}", state: absent }
+    - name: Base-backup from the primary (writes standby.signal + primary_conninfo)
+      ansible.builtin.command:
+        cmd: "pg_basebackup -h {{ primary_ip }} -U replicator -D {{ pg_data }} -Fp -Xs -R -P"
+      become_user: postgres
+      environment:
+        PGPASSWORD: replpass
+    - name: Start postgresql
+      ansible.builtin.service: { name: postgresql, state: started }
