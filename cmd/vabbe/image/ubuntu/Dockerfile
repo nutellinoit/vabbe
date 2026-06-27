@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 FROM ubuntu:24.04
 COPY boot-id-token.service /etc/systemd/system/boot-id-token.service
 COPY vabbe-rshared.service /etc/systemd/system/vabbe-rshared.service

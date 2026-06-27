@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 FROM rockylinux/rockylinux:9
 COPY boot-id-token.service /etc/systemd/system/boot-id-token.service
 COPY vabbe-rshared.service /etc/systemd/system/vabbe-rshared.service
