@@ -174,7 +174,10 @@ func (d *Docker) createNode(ctx context.Context, lab *Lab, node *Node, pubKeyPat
 		fmt.Sprintf("%s:/root/.ssh/authorized_keys:ro", pub),
 		fmt.Sprintf("%s:/root/.ssh/id_ed25519:ro", priv),
 	)
-	if !node.Runner {
+	// Bind the host modules only for default-runtime (runc) VM nodes. With an
+	// alternative runtime (Kata, gVisor) the node has its own guest kernel, so
+	// the host's /lib/modules would be the wrong kernel's modules.
+	if !node.Runner && node.Runtime == "" {
 		binds = append(binds, "/lib/modules:/lib/modules:ro")
 	}
 	// Resolve bind source paths to absolute; user mounts are relative to lab dir.
@@ -199,6 +202,7 @@ func (d *Docker) createNode(ctx context.Context, lab *Lab, node *Node, pubKeyPat
 		CapAdd:          capsIfNotPrivileged(node.Caps, privileged),
 		RestartPolicy:   container.RestartPolicy{Name: "unless-stopped"},
 		PublishAllPorts: false,
+		Runtime:         node.Runtime, // "" => daemon default (runc)
 	}
 	cc := &container.Config{
 		Image:      node.Image,
@@ -330,6 +334,11 @@ func (d *Docker) drift(ctx context.Context, lab *Lab, node *Node, id string) []s
 		want := node.Privileged != nil && *node.Privileged
 		if info.HostConfig.Privileged != want {
 			r = append(r, fmt.Sprintf("privileged (%t → %t)", info.HostConfig.Privileged, want))
+		}
+		// Only flag runtime when the node pins one (inspect reports the resolved
+		// default otherwise, which would be a false positive).
+		if node.Runtime != "" && info.HostConfig.Runtime != node.Runtime {
+			r = append(r, fmt.Sprintf("runtime (%s → %s)", info.HostConfig.Runtime, node.Runtime))
 		}
 		for _, m := range node.Mounts {
 			if !sliceContains(info.HostConfig.Binds, absBind(lab.Dir(), m)) {

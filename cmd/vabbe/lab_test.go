@@ -98,6 +98,43 @@ nodes:
 	}
 }
 
+func TestLoadRuntimeMerge(t *testing.T) {
+	cfg := `
+name: rt
+defaults: { runtime: kata }
+nodes:
+  - { name: a }
+  - { name: b, runtime: runc }
+`
+	p := writeLab(t, t.TempDir(), cfg)
+	lab, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if lab.Nodes[0].Runtime != "kata" {
+		t.Errorf("node a should inherit defaults.runtime=kata, got %q", lab.Nodes[0].Runtime)
+	}
+	if lab.Nodes[1].Runtime != "runc" {
+		t.Errorf("node b should keep its override runc, got %q", lab.Nodes[1].Runtime)
+	}
+}
+
+func TestLoadRuntimeDefaultsEmpty(t *testing.T) {
+	cfg := `
+name: rt
+nodes:
+  - { name: a }
+`
+	p := writeLab(t, t.TempDir(), cfg)
+	lab, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if lab.Nodes[0].Runtime != "" {
+		t.Errorf("runtime should stay empty (daemon default), got %q", lab.Nodes[0].Runtime)
+	}
+}
+
 func TestLoadAutoNetwork(t *testing.T) {
 	auto := `
 name: auto

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/docker/docker/api/types/system"
@@ -20,6 +21,7 @@ var doctorCmd = &cobra.Command{
 			return fmt.Errorf("docker not reachable: %w", err)
 		}
 		ctx := context.Background()
+		availRuntimes := map[string]bool{}
 		ping, err := dk.Ping(ctx)
 		if err != nil {
 			return fmt.Errorf("docker daemon unreachable: %w", err)
@@ -30,6 +32,16 @@ var doctorCmd = &cobra.Command{
 			fmt.Println(yellow("⚠")+" Info() failed:", err)
 		} else {
 			fmt.Printf("  daemon: %s %s\n", info.OperatingSystem, info.Architecture)
+			names := make([]string, 0, len(info.Runtimes))
+			for name := range info.Runtimes {
+				availRuntimes[name] = true
+				if name == info.DefaultRuntime {
+					name += " (default)"
+				}
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			fmt.Printf("  %s runtimes: %s\n", blue("i"), strings.Join(names, ", "))
 			if isDockerDesktop(info) {
 				fmt.Println(yellow("⚠") + " Docker Desktop: if kubeadm swap preflight fails run `vabbe host-prep`")
 			} else if runtime.GOOS == "linux" {
@@ -45,6 +57,9 @@ var doctorCmd = &cobra.Command{
 				for i := range lab.Nodes {
 					n := &lab.Nodes[i]
 					fmt.Printf("  - %s %s (%s)\n", n.Name, n.IP, n.Image)
+					if n.Runtime != "" && len(availRuntimes) > 0 && !availRuntimes[n.Runtime] {
+						fmt.Printf("    %s node %q wants runtime %q but the daemon doesn't have it; install/register it (see docs/kata.md)\n", red("✗"), n.Name, n.Runtime)
+					}
 				}
 				if lab.Runner() == nil {
 					fmt.Println(blue("i") + " no `runner: true` node set (needed by `vabbe shell`)")

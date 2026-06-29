@@ -46,6 +46,7 @@ type Defaults struct {
 	Image      *string  `yaml:"image"`
 	Privileged *bool    `yaml:"privileged"`
 	DNS        []string `yaml:"dns"`
+	Runtime    *string  `yaml:"runtime"`
 }
 
 type Node struct {
@@ -62,6 +63,7 @@ type Node struct {
 	Runner     bool              `yaml:"runner"`
 	Privileged *bool             `yaml:"privileged"`
 	DNS        []string          `yaml:"dns"`
+	Runtime    string            `yaml:"runtime"`
 }
 
 func Load(path string) (*Lab, error) {
@@ -132,6 +134,9 @@ func (l *Lab) applyDefaults() {
 				t := true
 				n.Privileged = &t
 			}
+		}
+		if n.Runtime == "" && l.Defaults.Runtime != nil {
+			n.Runtime = *l.Defaults.Runtime
 		}
 		for k, v := range n.Env {
 			n.Env[k] = expandEnv(v)
