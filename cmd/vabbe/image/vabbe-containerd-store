@@ -1,0 +1,43 @@
+#!/bin/sh
+# On a VM runtime (Kata) /var/lib/containerd lands on virtiofs, which can't hold an
+# overlayfs upperdir — virtiofs doesn't support the trusted.overlay.opaque xattr
+# containerd's overlay snapshotter sets, so image-layer extraction fails:
+#   failed to convert whiteout file ".wh..wh..opq": operation not supported
+# and kubeadm init dies at ImagePull. Back /var/lib/containerd with a guest-local
+# ext4 filesystem on a loop device (overlay-capable). The backing image is sparse:
+# ~0 on disk to start, grows with pulled images up to the cap. No-op on runc, where
+# the volume is already a real, overlay-capable fs.
+set -e
+
+TARGET=/var/lib/containerd
+IMG=/var/lib/vabbe-containerd.img
+SIZE=10G
+
+# Only act when the target is a shared-fs mount that can't back overlayfs.
+ft=$(findmnt -n -o FSTYPE --target "$TARGET" 2>/dev/null || true)
+case "$ft" in
+	virtiofs | fuse | fuseblk | fuse.* | 9p) ;;
+	*) exit 0 ;; # real fs already (runc, or already loop-mounted on a re-run)
+esac
+
+# Create the ext4 image once (lazy init keeps the initial write — and disk use —
+# tiny); reuse it across reboots.
+if [ ! -f "$IMG" ]; then
+	truncate -s "$SIZE" "$IMG"
+	mkfs.ext4 -q -F -E lazy_itable_init=1,lazy_journal_init=1 "$IMG"
+fi
+
+mkdir -p "$TARGET"
+
+# Kata's guest /dev is an OCI-minimal tmpfs, so loop device nodes are absent even
+# though the kernel registered them (CONFIG_BLK_DEV_LOOP=y → /sys/block/loop*).
+# Create the nodes (major 7 for /dev/loopN, 10:237 for loop-control) so losetup /
+# `mount -o loop` can find a device.
+[ -e /dev/loop-control ] || mknod /dev/loop-control c 10 237
+i=0
+while [ "$i" -lt 8 ]; do
+	[ -e "/dev/loop$i" ] || mknod "/dev/loop$i" b 7 "$i"
+	i=$((i + 1))
+done
+
+mount -o loop "$IMG" "$TARGET"
