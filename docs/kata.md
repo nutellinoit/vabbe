@@ -48,6 +48,26 @@ examples) run. vabbe arranges this automatically, zero config:
 - `vabbe doctor` lists the daemon's available runtimes and flags a node whose
   `runtime:` the daemon doesn't have, so you catch it before `up`.
 
+## Caveat: DNS — no Docker embedded resolver inside the VM
+
+Docker's embedded resolver `127.0.0.11` (which resolves other nodes by name, and
+forwards external lookups) is iptables/proxy magic that lives in the host network
+namespace. **Inside a Kata VM it doesn't work** — there `127.0.0.11` is just the
+guest's own loopback, with nothing listening, so name resolution silently fails.
+
+What this means for Kata nodes:
+
+- **Use a real upstream resolver.** vabbe's default (`1.1.1.1`, `1.0.0.1`) already
+  does this, so a Kata node resolves the internet out of the box (apt/dnf work).
+  Do **not** set `dns: ["127.0.0.11"]` on a Kata node — it'll have no DNS at all.
+  (Some examples set `127.0.0.11` for runc; override it to a real upstream when
+  running them under Kata.)
+- **No node-to-node name resolution.** With a real upstream (not the embedded
+  resolver) a node can't resolve its peers by name. Reference peers by **IP** —
+  `vabbe ip` / `vabbe inventory` / `vabbe dns` report the live addresses (static or
+  Docker-assigned). This matches the existing `dns:` trade-off in
+  [gotchas.md](gotchas.md), it's just unavoidable under Kata.
+
 ## Installing & registering Kata with Docker
 
 Use the **official static release** (self-contained: shim + guest kernel + image +
