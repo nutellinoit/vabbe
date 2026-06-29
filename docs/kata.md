@@ -48,7 +48,10 @@ examples) run. vabbe arranges this automatically, zero config:
   `ip_vs*` family, etc. vabbe's node image ships a boot service (`vabbe-kmod`) that
   synthesizes a `modules.builtin` for that common set on VM-runtime nodes, so
   `modprobe <mod>` is a no-op success (the feature is already in the kernel). A
-  module *not* in that set still fails (correctly). No-op on runc.
+  module *not* in that set still fails (correctly). No-op on runc. Note: this fixes
+  the **`modprobe` CLI**; tools that read `/proc/modules` (`lsmod`, Ansible's
+  `modprobe` module) need a modules-enabled guest kernel — see
+  [Loadable-module tooling](#loadable-module-tooling-lsmod-ansible-modprobe) below.
 - **`vabbe exec`/`shell`/`ssh` go over real SSH** for a VM node (using the lab
   keypair and the node IP), not `docker exec`. A Kata node runs systemd, which owns
   the cgroup, so the runtime can't attach a `docker exec` process to it
@@ -135,6 +138,50 @@ sizing, set `default_vcpus = 0` / lower `default_memory` in the Kata config.
   haven't rebooted, the running kernel's modules may be gone from `/lib/modules`,
   so `vhost_vsock` won't load until you reboot into the new kernel. (Watch out:
   `yay -S …` runs a full `-Syu` and can upgrade your kernel as a side effect.)
+
+## Loadable-module tooling (`lsmod`, Ansible `modprobe`)
+
+`vabbe-kmod` fixes the **`modprobe` CLI**, but tools that *introspect* loaded
+modules read `/proc/modules`:
+
+- `lsmod` → `libkmod: ERROR ... could not open /proc/modules`
+- Ansible's `community.general.modprobe` / `ansible.builtin.modprobe` (used by e.g.
+  the KFD `kube-node-common` role) → `[Errno 2] No such file or directory:
+  '/proc/modules'` → the task fails on every node, so kubeadm never runs.
+
+The reason: Kata's **default** guest kernel is built **without loadable-module
+support** (`CONFIG_MODULES=n`), so the kernel never exposes `/proc/modules`. It
+can't be faked at runtime — `/proc` is procfs (you can't `touch` it, and there's
+no mount point to bind over). The only fix is a guest kernel built with
+`CONFIG_MODULES=y`.
+
+**No rebuild needed** — the kata-static release already ships one:
+`vmlinux-nvidia-gpu` is built with `CONFIG_MODULES=y`. Despite the name it's a
+**standard kernel with module support** — it boots fine without a GPU and is
+essentially the same size; the `nvidia-gpu` label is just the Kata build flavor.
+Point Kata at it (host-wide):
+
+```toml
+# /etc/kata-containers/configuration.toml  (override; copy from
+# /opt/kata/share/defaults/kata-containers/configuration-qemu.toml)
+kernel = "/opt/kata/share/kata-containers/vmlinux-nvidia-gpu.container"
+```
+
+```sh
+sudo systemctl reload docker   # or restart, per your setup
+```
+
+Verified result on a vabbe Kata node: the node boots normally (`uname -r` →
+`…-nvidia-gpu`, systemd `running`), `/proc/modules` exists (empty — the modules are
+built **in**, so nothing is "loaded"), `lsmod` works, and the Ansible `modprobe`
+module is satisfied (it reads the empty `/proc/modules`, runs `modprobe`, which
+returns 0 thanks to `vabbe-kmod`'s `modules.builtin`). Built-in modules never show
+up in `/proc/modules` — that's expected and fine.
+
+(Per-node instead of host-wide: Kata's `io.katacontainers.config.hypervisor.kernel`
+annotation can select the kernel per container, but Kata blocks kernel-path
+annotations unless you allow them via `enable_annotations` — so it still needs a
+Kata config change. Host-wide is simpler.)
 
 ## Caveat: Kata guest kernel is minimal
 
