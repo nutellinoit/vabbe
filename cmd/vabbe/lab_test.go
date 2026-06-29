@@ -360,3 +360,17 @@ nodes:
 		t.Errorf("a privileged should be false (from defaults)")
 	}
 }
+
+func TestShellQuote(t *testing.T) {
+	cases := map[string]string{
+		"simple":          "'simple'",
+		"two words":       "'two words'",
+		"select x from t": "'select x from t'",
+		"it's":            `'it'\''s'`,
+	}
+	for in, want := range cases {
+		if got := shellQuote(in); got != want {
+			t.Errorf("shellQuote(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

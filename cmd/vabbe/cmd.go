@@ -276,10 +276,25 @@ func sshExec(lab *Lab, dk *Docker, node string, cmd []string, tty bool) error {
 		args = append(args, "-t")
 	}
 	args = append(args, "root@"+ip)
-	args = append(args, cmd...)
+	// ssh re-parses the remote command through the login shell, unlike docker
+	// exec which runs the argv directly. Shell-quote each arg and pass them as a
+	// single token so a command like `psql -tAc "select 1"` survives intact.
+	if len(cmd) > 0 {
+		quoted := make([]string, len(cmd))
+		for i, a := range cmd {
+			quoted[i] = shellQuote(a)
+		}
+		args = append(args, strings.Join(quoted, " "))
+	}
 	c := exec.Command("ssh", args...)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return c.Run()
+}
+
+// shellQuote single-quotes s for a POSIX remote shell, so args with spaces or
+// metacharacters reach the node verbatim (matching docker exec's argv semantics).
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 var sshCmd = &cobra.Command{
