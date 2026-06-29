@@ -166,7 +166,7 @@ nodes:
 	// kata node with no cmd gets the cgroup-remount-then-systemd shim + SYS_ADMIN,
 	// so systemd boots as PID1 inside the VM.
 	got := byName["auto"].Cmd
-	if len(got) != 3 || got[2] != "mount -o remount,rw /sys/fs/cgroup 2>/dev/null; exec /sbin/init" {
+	if len(got) != 3 || got[2] != "mount -o remount,rw /sys/fs/cgroup 2>/dev/null; mount -o remount,rw /proc/sys 2>/dev/null; exec /sbin/init" {
 		t.Errorf("auto node should default to the systemd shim cmd, got %v", got)
 	}
 	// no explicit caps → VM-grade default (ALL).

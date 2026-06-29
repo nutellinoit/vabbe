@@ -34,6 +34,7 @@ kernel/net/netfilter/ipvs/ip_vs_rr.ko
 kernel/net/netfilter/ipvs/ip_vs_wrr.ko
 kernel/net/netfilter/ipvs/ip_vs_sh.ko
 kernel/drivers/net/vxlan.ko
+kernel/kernel/configs.ko
 EOF
 : > "$D/modules.order"
 : > "$D/modules.builtin.modinfo"   # optional file; empty silences a depmod warning

@@ -28,11 +28,14 @@ services start, installers that drive units (Kubernetes/kubelet, the ansible
 examples) run. vabbe arranges this automatically, zero config:
 
 - **systemd boots, but needs help.** Under Kata the node *is* a VM, and Kata mounts
-  `/sys/fs/cgroup` **read-only**. systemd-as-init must *write* the cgroup tree (to
-  create slices/scopes), so on a read-only cgroup it exits 255 and crash-loops. So
-  vabbe gives a VM-runtime node **`CAP_SYS_ADMIN`** and a tiny shim command that
-  **remounts `/sys/fs/cgroup` read-write before handing off to systemd**:
-  `sh -c "mount -o remount,rw /sys/fs/cgroup; exec /sbin/init"`. Set your own
+  the OCI read-only paths `/sys/fs/cgroup` and `/proc/sys` **read-only**. systemd
+  must *write* the cgroup tree (to create slices/scopes) — on a read-only cgroup it
+  exits 255 and crash-loops — and installers need `/proc/sys` writable for `sysctl`
+  (kubeadm wants `net.ipv4.ip_forward=1`, Cilium/kube-proxy set many). So vabbe
+  gives a VM-runtime node **`CAP_SYS_ADMIN`** and a tiny shim that **remounts both
+  read-write before handing off to systemd**:
+  `sh -c "mount -o remount,rw /sys/fs/cgroup; mount -o remount,rw /proc/sys; exec /sbin/init"`.
+  (runc VM nodes get these rw via `privileged: true`.) Set your own
   `entrypoint:`/`cmd:` to override (the cap is still added).
 - **`privileged` defaults to `false`, but caps default to `ALL`** for a VM runtime.
   A Kata node is a hypervisor-isolated VM, so VM-grade capabilities inside are safe
@@ -45,10 +48,14 @@ examples) run. vabbe arranges this automatically, zero config:
 - **`modprobe` works for built-in modules.** The guest has no `/lib/modules` tree,
   so `modprobe` would `FATAL` even for modules compiled into the Kata kernel —
   breaking installers that load `nf_conntrack`, `br_netfilter`, `overlay`, the
-  `ip_vs*` family, etc. vabbe's node image ships a boot service (`vabbe-kmod`) that
-  synthesizes a `modules.builtin` for that common set on VM-runtime nodes, so
-  `modprobe <mod>` is a no-op success (the feature is already in the kernel). A
-  module *not* in that set still fails (correctly). No-op on runc. Note: this fixes
+  `ip_vs*` family, `configs` (kubeadm preflight), etc. vabbe's node image ships a
+  boot service (`vabbe-kmod`) that synthesizes a `modules.builtin` for that common
+  set on VM-runtime nodes, so `modprobe <mod>` is a no-op success (the feature is
+  already in the kernel). A module *not* in that set still fails (correctly). No-op
+  on runc. (Caveat: `configs` is listed so kubeadm's `modprobe configs` doesn't
+  `FATAL`, but the stock Kata kernels are built `CONFIG_IKCONFIG=n`, so
+  `/proc/config.gz` won't actually appear — kubeadm's kernel-config check then just
+  warns, it doesn't block.) Note: this fixes
   the **`modprobe` CLI**; tools that read `/proc/modules` (`lsmod`, Ansible's
   `modprobe` module) need a modules-enabled guest kernel — see
   [Loadable-module tooling](#loadable-module-tooling-lsmod-ansible-modprobe) below.
