@@ -202,12 +202,16 @@ func (l *Lab) applyDefaults() {
 				n.Caps = appendUnique(n.Caps, "SYS_ADMIN")
 			}
 			if len(n.Entrypoint) == 0 && len(n.Cmd) == 0 {
-				// Remount the OCI read-only paths systemd/installers need to write:
-				// /sys/fs/cgroup (so systemd can create slices) and /proc/sys (so
-				// sysctl works — kubeadm wants net.ipv4.ip_forward=1, Cilium/kube-proxy
-				// set many). runc VM nodes get these rw via privileged: true; Kata
-				// nodes are non-privileged but have CAP_SYS_ADMIN, so we remount them.
-				n.Cmd = []string{"/bin/sh", "-c", "mount -o remount,rw /sys/fs/cgroup 2>/dev/null; mount -o remount,rw /proc/sys 2>/dev/null; exec /sbin/init"}
+				// Early bring-up the Kata guest needs before systemd/installers, done
+				// in the entrypoint so it runs every boot before PID1:
+				//   - remount /sys/fs/cgroup rw (so systemd can create slices),
+				//   - remount /proc/sys rw (so sysctl works — kubeadm wants
+				//     net.ipv4.ip_forward=1, Cilium/kube-proxy set many),
+				//   - mknod /dev/kmsg (Kata's OCI-minimal /dev lacks it; kubelet
+				//     crash-loops without it — the kernel has it, the node is missing).
+				// runc VM nodes get all this via privileged: true; Kata nodes are
+				// non-privileged but have CAP_SYS_ADMIN/MKNOD, so we do it by hand.
+				n.Cmd = []string{"/bin/sh", "-c", "mount -o remount,rw /sys/fs/cgroup 2>/dev/null; mount -o remount,rw /proc/sys 2>/dev/null; [ -e /dev/kmsg ] || mknod /dev/kmsg c 1 11; exec /sbin/init"}
 			}
 		}
 		for k, v := range n.Env {

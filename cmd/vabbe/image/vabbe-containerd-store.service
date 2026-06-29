@@ -1,0 +1,13 @@
+[Unit]
+Description=vabbe: back /var/lib/containerd with ext4-on-loop on VM-runtime (Kata) nodes (virtiofs can't hold overlayfs)
+After=local-fs.target
+Before=containerd.service kubelet.service multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Leading "-": best-effort, never fail the boot.
+ExecStart=-/usr/local/sbin/vabbe-containerd-store
+
+[Install]
+WantedBy=multi-user.target

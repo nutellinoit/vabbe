@@ -31,11 +31,13 @@ examples) run. vabbe arranges this automatically, zero config:
   the OCI read-only paths `/sys/fs/cgroup` and `/proc/sys` **read-only**. systemd
   must *write* the cgroup tree (to create slices/scopes) — on a read-only cgroup it
   exits 255 and crash-loops — and installers need `/proc/sys` writable for `sysctl`
-  (kubeadm wants `net.ipv4.ip_forward=1`, Cilium/kube-proxy set many). So vabbe
-  gives a VM-runtime node **`CAP_SYS_ADMIN`** and a tiny shim that **remounts both
-  read-write before handing off to systemd**:
-  `sh -c "mount -o remount,rw /sys/fs/cgroup; mount -o remount,rw /proc/sys; exec /sbin/init"`.
-  (runc VM nodes get these rw via `privileged: true`.) Set your own
+  (kubeadm wants `net.ipv4.ip_forward=1`, Cilium/kube-proxy set many). It also
+  `mknod`s **`/dev/kmsg`**, which Kata's OCI-minimal `/dev` lacks — kubelet
+  crash-loops without it (the kernel has it, only the device node is missing). So
+  vabbe gives a VM-runtime node **`CAP_SYS_ADMIN`** and a tiny shim that does all
+  this before handing off to systemd:
+  `sh -c "mount -o remount,rw /sys/fs/cgroup; mount -o remount,rw /proc/sys; [ -e /dev/kmsg ] || mknod /dev/kmsg c 1 11; exec /sbin/init"`.
+  (runc VM nodes get all this via `privileged: true`.) Set your own
   `entrypoint:`/`cmd:` to override (the cap is still added).
 - **`privileged` defaults to `false`, but caps default to `ALL`** for a VM runtime.
   A Kata node is a hypervisor-isolated VM, so VM-grade capabilities inside are safe
@@ -68,6 +70,14 @@ examples) run. vabbe arranges this automatically, zero config:
   honoring an `/etc/kata-containers/configuration.toml` override, falling back to
   `/opt/kata` — bind-mounts it in, and `vabbe-kmod` places it where kubeadm looks.
   Skipped silently if it can't be found.
+- **`/var/lib/containerd` is backed by ext4-on-loop.** On Kata that path lands on
+  virtiofs, which can't hold an overlayfs upperdir (no `trusted.overlay.opaque`
+  xattr) — so containerd's overlay snapshotter can't extract image layers
+  (`failed to convert whiteout … operation not supported`; kubeadm dies at
+  ImagePull). A boot service (`vabbe-containerd-store`) mounts a **sparse 10 GB ext4
+  image on a loop device** there (Kata's `/dev` is OCI-minimal, so it `mknod`s the
+  loop nodes first — the kernel has them, the device files are just missing). Sparse
+  ⇒ ~0 disk to start, grows to the cap. No-op on runc.
 - **`vabbe exec`/`shell`/`ssh` go over real SSH** for a VM node (using the lab
   keypair and the node IP), not `docker exec`. A Kata node runs systemd, which owns
   the cgroup, so the runtime can't attach a `docker exec` process to it

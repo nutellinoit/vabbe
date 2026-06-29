@@ -5,19 +5,22 @@ COPY vabbe-resolv.service /etc/systemd/system/vabbe-resolv.service
 COPY vabbe-resolv /usr/local/sbin/vabbe-resolv
 COPY vabbe-kmod.service /etc/systemd/system/vabbe-kmod.service
 COPY vabbe-kmod /usr/local/sbin/vabbe-kmod
+COPY vabbe-containerd-store.service /etc/systemd/system/vabbe-containerd-store.service
+COPY vabbe-containerd-store /usr/local/sbin/vabbe-containerd-store
 RUN dnf -y install \
       systemd dbus \
       openssh-server openssh-clients sudo python3 python3-dnf \
-      iproute iputils kmod iptables ipset ipvsadm procps-ng \
+      iproute iputils kmod iptables ipset ipvsadm procps-ng e2fsprogs \
  && dnf clean all && rm -rf /var/cache/dnf \
  && mkdir -p /run/sshd /root/.ssh && chmod 700 /root/.ssh \
  && ssh-keygen -A \
- && chmod +x /usr/local/sbin/vabbe-resolv /usr/local/sbin/vabbe-kmod \
+ && chmod +x /usr/local/sbin/vabbe-resolv /usr/local/sbin/vabbe-kmod /usr/local/sbin/vabbe-containerd-store \
  && systemctl enable sshd \
  && systemctl enable boot-id-token.service \
  && systemctl enable vabbe-rshared.service \
  && systemctl enable vabbe-resolv.service \
  && systemctl enable vabbe-kmod.service \
+ && systemctl enable vabbe-containerd-store.service \
  && printf 'PermitRootLogin prohibit-password\nPasswordAuthentication no\nStrictModes no\n' \
       > /etc/ssh/sshd_config.d/vabbe.conf \
  # nsswitch lists `sss` first but sssd-client isn't installed; a lookup starting
