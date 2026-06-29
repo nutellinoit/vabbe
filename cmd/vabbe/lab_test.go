@@ -150,7 +150,7 @@ name: rt
 defaults: { runtime: kata }
 nodes:
   - { name: auto }
-  - { name: custom, cmd: ["/usr/sbin/sshd","-D"] }
+  - { name: custom, cmd: ["/usr/sbin/sshd","-D"], caps: ["NET_ADMIN"] }
   - { name: runner, runner: true }
   - { name: plain, runtime: runc }
 `
@@ -169,15 +169,17 @@ nodes:
 	if len(got) != 3 || got[2] != "mount -o remount,rw /sys/fs/cgroup 2>/dev/null; exec /sbin/init" {
 		t.Errorf("auto node should default to the systemd shim cmd, got %v", got)
 	}
-	if !hasCap(byName["auto"].Caps, "SYS_ADMIN") {
-		t.Errorf("auto kata node should get SYS_ADMIN, got %v", byName["auto"].Caps)
+	// no explicit caps → VM-grade default (ALL).
+	if c := byName["auto"].Caps; len(c) != 1 || c[0] != "ALL" {
+		t.Errorf("auto kata node should default to caps [ALL], got %v", c)
 	}
-	// explicit cmd wins, but SYS_ADMIN is still added (needed for cgroup rw).
+	// explicit cmd wins, and an explicit caps set is preserved but SYS_ADMIN is
+	// still ensured (needed for the cgroup remount).
 	if c := byName["custom"].Cmd; len(c) != 2 || c[0] != "/usr/sbin/sshd" {
 		t.Errorf("custom node cmd should be preserved, got %v", c)
 	}
-	if !hasCap(byName["custom"].Caps, "SYS_ADMIN") {
-		t.Errorf("custom kata node should still get SYS_ADMIN, got %v", byName["custom"].Caps)
+	if !hasCap(byName["custom"].Caps, "NET_ADMIN") || !hasCap(byName["custom"].Caps, "SYS_ADMIN") {
+		t.Errorf("custom kata node should keep NET_ADMIN and gain SYS_ADMIN, got %v", byName["custom"].Caps)
 	}
 	// runner opts out entirely (manages its own entrypoint, no SYS_ADMIN).
 	if c := byName["runner"].Cmd; len(c) != 0 {

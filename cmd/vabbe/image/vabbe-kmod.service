@@ -1,0 +1,15 @@
+[Unit]
+Description=vabbe: synthesize /lib/modules modules.builtin so modprobe works on VM-runtime (Kata) nodes
+DefaultDependencies=no
+After=systemd-remount-fs.service local-fs.target
+Before=sysinit.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Leading "-": best-effort, never fail the boot / mark the node degraded.
+ExecStart=-/usr/local/sbin/vabbe-kmod
+
+[Install]
+WantedBy=sysinit.target

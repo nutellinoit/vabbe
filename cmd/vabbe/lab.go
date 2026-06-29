@@ -190,7 +190,17 @@ func (l *Lab) applyDefaults() {
 		// recreates device nodes that already exist → /dev/full EEXIST.) A user-set
 		// entrypoint/cmd, or runner:, opts out; so does runtime: runc.
 		if isVMRuntime(n.Runtime) && !n.Runner {
-			n.Caps = appendUnique(n.Caps, "SYS_ADMIN")
+			// A Kata node is a hypervisor-isolated micro-VM, so give it VM-grade
+			// capabilities by default — root inside a VM is expected to do anything,
+			// and this is the parity of the privileged: true that runc VM nodes get
+			// (without the device passthrough that breaks Kata). Installers (kubeadm,
+			// Cilium, …) rely on it. Overridable via caps:; SYS_ADMIN is always kept
+			// since the cgroup remount below needs it.
+			if len(n.Caps) == 0 {
+				n.Caps = []string{"ALL"}
+			} else {
+				n.Caps = appendUnique(n.Caps, "SYS_ADMIN")
+			}
 			if len(n.Entrypoint) == 0 && len(n.Cmd) == 0 {
 				n.Cmd = []string{"/bin/sh", "-c", "mount -o remount,rw /sys/fs/cgroup 2>/dev/null; exec /sbin/init"}
 			}

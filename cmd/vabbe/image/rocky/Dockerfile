@@ -3,6 +3,8 @@ COPY boot-id-token.service /etc/systemd/system/boot-id-token.service
 COPY vabbe-rshared.service /etc/systemd/system/vabbe-rshared.service
 COPY vabbe-resolv.service /etc/systemd/system/vabbe-resolv.service
 COPY vabbe-resolv /usr/local/sbin/vabbe-resolv
+COPY vabbe-kmod.service /etc/systemd/system/vabbe-kmod.service
+COPY vabbe-kmod /usr/local/sbin/vabbe-kmod
 RUN dnf -y install \
       systemd dbus \
       openssh-server openssh-clients sudo python3 python3-dnf \
@@ -10,11 +12,12 @@ RUN dnf -y install \
  && dnf clean all && rm -rf /var/cache/dnf \
  && mkdir -p /run/sshd /root/.ssh && chmod 700 /root/.ssh \
  && ssh-keygen -A \
- && chmod +x /usr/local/sbin/vabbe-resolv \
+ && chmod +x /usr/local/sbin/vabbe-resolv /usr/local/sbin/vabbe-kmod \
  && systemctl enable sshd \
  && systemctl enable boot-id-token.service \
  && systemctl enable vabbe-rshared.service \
  && systemctl enable vabbe-resolv.service \
+ && systemctl enable vabbe-kmod.service \
  && printf 'PermitRootLogin prohibit-password\nPasswordAuthentication no\nStrictModes no\n' \
       > /etc/ssh/sshd_config.d/vabbe.conf \
  # nsswitch lists `sss` first but sssd-client isn't installed; a lookup starting

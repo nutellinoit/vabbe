@@ -1,0 +1,41 @@
+#!/bin/sh
+# On a VM runtime (Kata, gVisor) the node boots the guest's own kernel but uses
+# this image as its rootfs — which has no /lib/modules tree. So `modprobe <mod>`
+# FATALs ("Module not found in /lib/modules/<kver>") even for modules that are
+# *built into* the guest kernel, which breaks installers that call modprobe
+# (kubeadm/kube-proxy prep, Cilium, the KFD kube-node-common role: ip_vs*,
+# nf_conntrack, br_netfilter, overlay).
+#
+# The functionality is compiled in; modprobe just needs a modules.builtin to
+# treat these as built-in (a no-op success). We synthesize one for the common
+# Kubernetes set and run depmod. On runc nodes vabbe bind-mounts the host's real
+# /lib/modules, so this is a no-op there (we bail if a real tree is present).
+set -e
+
+K="$(uname -r)"
+D="/lib/modules/$K"
+
+# A real modules tree is already mounted (runc host bind-mount) — leave it alone.
+[ -e "$D/modules.dep" ] && exit 0
+[ -e "$D/modules.builtin.bin" ] && exit 0
+
+mkdir -p "$D"
+cat > "$D/modules.builtin" <<'EOF'
+kernel/net/netfilter/nf_conntrack.ko
+kernel/net/netfilter/nf_conntrack_netlink.ko
+kernel/net/netfilter/nf_nat.ko
+kernel/net/netfilter/xt_conntrack.ko
+kernel/net/netfilter/xt_MASQUERADE.ko
+kernel/net/bridge/bridge.ko
+kernel/net/bridge/br_netfilter.ko
+kernel/fs/overlayfs/overlay.ko
+kernel/net/netfilter/ipvs/ip_vs.ko
+kernel/net/netfilter/ipvs/ip_vs_rr.ko
+kernel/net/netfilter/ipvs/ip_vs_wrr.ko
+kernel/net/netfilter/ipvs/ip_vs_sh.ko
+kernel/drivers/net/vxlan.ko
+EOF
+: > "$D/modules.order"
+: > "$D/modules.builtin.modinfo"   # optional file; empty silences a depmod warning
+
+depmod "$K" 2>/dev/null || true

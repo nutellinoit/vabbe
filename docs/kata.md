@@ -34,10 +34,21 @@ examples) run. vabbe arranges this automatically, zero config:
   **remounts `/sys/fs/cgroup` read-write before handing off to systemd**:
   `sh -c "mount -o remount,rw /sys/fs/cgroup; exec /sbin/init"`. Set your own
   `entrypoint:`/`cmd:` to override (the cap is still added).
-- **`privileged` defaults to `false`** for a VM runtime (you can still force it on).
-  `CAP_SYS_ADMIN` is enough for the cgroup remount, and full `privileged: true`
-  actually *breaks* Kata: it tries to recreate device nodes that already exist in
-  the guest (`Creating container device /dev/full … EEXIST`).
+- **`privileged` defaults to `false`, but caps default to `ALL`** for a VM runtime.
+  A Kata node is a hypervisor-isolated VM, so VM-grade capabilities inside are safe
+  and expected (it's the parity of the `privileged: true` runc VM nodes get) —
+  installers like kubeadm/Cilium rely on it. Override with `caps:` for a tighter
+  set (`SYS_ADMIN` is always kept; it's needed for the cgroup remount). Full
+  `privileged: true` is *not* used because it **breaks** Kata: it recreates device
+  nodes that already exist in the guest (`Creating container device /dev/full …
+  EEXIST`).
+- **`modprobe` works for built-in modules.** The guest has no `/lib/modules` tree,
+  so `modprobe` would `FATAL` even for modules compiled into the Kata kernel —
+  breaking installers that load `nf_conntrack`, `br_netfilter`, `overlay`, the
+  `ip_vs*` family, etc. vabbe's node image ships a boot service (`vabbe-kmod`) that
+  synthesizes a `modules.builtin` for that common set on VM-runtime nodes, so
+  `modprobe <mod>` is a no-op success (the feature is already in the kernel). A
+  module *not* in that set still fails (correctly). No-op on runc.
 - **`vabbe exec`/`shell`/`ssh` go over real SSH** for a VM node (using the lab
   keypair and the node IP), not `docker exec`. A Kata node runs systemd, which owns
   the cgroup, so the runtime can't attach a `docker exec` process to it
@@ -127,8 +138,12 @@ sizing, set `default_vcpus = 0` / lower `default_memory` in the Kata config.
 
 ## Caveat: Kata guest kernel is minimal
 
-Kata's bundled guest kernel is stripped down. Kubernetes features that need
-specific modules (e.g. `ip_vs` for kube-proxy IPVS) may not be present in the
-guest — you'd need a custom Kata kernel/config. So "Kata makes host-prep
-unnecessary" is true for swap (each guest has its own), but **module
-availability moves into the guest**, it doesn't disappear.
+Kata's bundled guest kernel is reasonably complete — the Kubernetes essentials
+(`nf_conntrack`, `br_netfilter`, `overlay`, the `ip_vs*` family, `vxlan`) are
+compiled **in**, and vabbe's `vabbe-kmod` boot service makes `modprobe` find them
+(see above). But the kernel is fixed: a module that *isn't* built into Kata's
+kernel can't be loaded at all (there's no matching `/lib/modules/*.ko` to insert),
+so a feature outside the built-in set needs a **custom Kata kernel/config**. So
+"Kata makes host-prep unnecessary" is true for swap (each guest has its own), but
+**module availability moves into the guest** — it doesn't disappear, it's fixed at
+the Kata kernel build.
