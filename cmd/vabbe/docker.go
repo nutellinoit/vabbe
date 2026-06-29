@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
@@ -198,6 +199,16 @@ func (d *Docker) createNode(ctx context.Context, lab *Lab, node *Node, pubKeyPat
 	// the host's /lib/modules would be the wrong kernel's modules.
 	if !node.Runner && node.Runtime == "" {
 		binds = append(binds, "/lib/modules:/lib/modules:ro")
+	}
+	// For a VM runtime (Kata) ship the guest kernel's build config into the node so
+	// tools that read it work (kubeadm SystemVerification, which otherwise errors
+	// "no config path available" — the Kata kernel has no /proc/config.gz). The
+	// config is a host artifact (kata-static); vabbe-kmod places it at the paths
+	// kubeadm checks. Skipped silently if not found.
+	if isVMRuntime(node.Runtime) {
+		if cfg := kataKernelConfigPath(node.Runtime); cfg != "" {
+			binds = append(binds, cfg+":/run/vabbe/kernel.config:ro")
+		}
 	}
 	// Resolve bind source paths to absolute; user mounts are relative to lab dir.
 	for i, b := range binds {
@@ -731,6 +742,150 @@ func capsIfNotPrivileged(caps []string, privileged bool) []string {
 		return nil
 	}
 	return caps
+}
+
+// kataKernelConfigPath returns the host path of the active Kata guest kernel's
+// build config (e.g. /opt/kata/share/kata-containers/config-<ver>). Returns "" if
+// it can't be found — vabbe then just doesn't ship it (the node still works; only
+// kubeadm's SystemVerification kernel-config check is affected). It intentionally
+// couples to the kata-static layout so VM nodes satisfy that check with no host
+// provisioning.
+//
+// Primary source is `kata-runtime env` (authoritative — Kata resolves its own
+// config, honoring KATA_CONF_FILE / the /etc override / defaults). Falls back to
+// parsing the config files ourselves if the binary isn't found.
+func kataKernelConfigPath(runtime string) string {
+	if cfg := kernelConfigSibling(kataRuntimeKernelPath(runtime)); cfg != "" {
+		return cfg
+	}
+	candidates := []string{"/etc/kata-containers/configuration.toml"}
+	if root := dockerRuntimeRoot(runtime); root != "" {
+		candidates = append(candidates, filepath.Join(root, "share/defaults/kata-containers/configuration.toml"))
+	}
+	candidates = append(candidates,
+		"/opt/kata/share/defaults/kata-containers/configuration.toml",
+		"/usr/share/defaults/kata-containers/configuration.toml",
+	)
+	for _, c := range candidates {
+		data, err := os.ReadFile(c)
+		if err != nil {
+			continue
+		}
+		if cfg := kernelConfigSibling(tomlFirstString(string(data), "kernel")); cfg != "" {
+			return cfg
+		}
+	}
+	return ""
+}
+
+// kataRuntimeKernelPath asks `kata-runtime env --json` for the resolved guest
+// kernel path. The binary is found next to the runtime's shim (from daemon.json),
+// else on PATH. "" on any failure.
+func kataRuntimeKernelPath(runtime string) string {
+	bin := "kata-runtime"
+	if root := dockerRuntimeRoot(runtime); root != "" {
+		if cand := filepath.Join(root, "bin", "kata-runtime"); fileExists(cand) {
+			bin = cand
+		}
+	}
+	out, err := exec.Command(bin, "env", "--json").Output()
+	if err != nil {
+		return ""
+	}
+	var env struct {
+		Kernel struct{ Path string }
+	}
+	if json.Unmarshal(out, &env) != nil {
+		return ""
+	}
+	return env.Kernel.Path
+}
+
+// kernelConfigSibling maps a kernel image path (…/vmlinux-<ver>) to its build
+// config sibling (…/config-<ver>), following symlinks. "" if it doesn't exist.
+func kernelConfigSibling(kernel string) string {
+	if kernel == "" {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(kernel); err == nil {
+		kernel = resolved
+	}
+	base := filepath.Base(kernel) // vmlinux-<ver> / vmlinuz-<ver>
+	var suffix string
+	switch {
+	case strings.HasPrefix(base, "vmlinux"):
+		suffix = strings.TrimPrefix(base, "vmlinux")
+	case strings.HasPrefix(base, "vmlinuz"):
+		suffix = strings.TrimPrefix(base, "vmlinuz")
+	default:
+		return ""
+	}
+	cfg := filepath.Join(filepath.Dir(kernel), "config"+suffix)
+	if fi, err := os.Stat(cfg); err == nil && !fi.IsDir() {
+		return cfg
+	}
+	return ""
+}
+
+func fileExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
+}
+
+// dockerRuntimeRoot reads /etc/docker/daemon.json and returns the install root of
+// the named Docker runtime — derived from its shim/binary path (e.g.
+// runtimes.kata.runtimeType = /opt/kata/bin/containerd-shim-kata-v2 → /opt/kata).
+// "" if daemon.json is absent/unparseable or the runtime isn't there.
+func dockerRuntimeRoot(runtime string) string {
+	data, err := os.ReadFile("/etc/docker/daemon.json")
+	if err != nil {
+		return ""
+	}
+	var dj struct {
+		Runtimes map[string]struct {
+			Path        string `json:"path"`
+			RuntimeType string `json:"runtimeType"`
+		} `json:"runtimes"`
+	}
+	if json.Unmarshal(data, &dj) != nil {
+		return ""
+	}
+	rt, ok := dj.Runtimes[runtime]
+	if !ok {
+		return ""
+	}
+	bin := rt.RuntimeType
+	if bin == "" {
+		bin = rt.Path
+	}
+	if bin == "" {
+		return ""
+	}
+	return filepath.Dir(filepath.Dir(bin)) // <root>/bin/<shim> → <root>
+}
+
+// tomlFirstString returns the first `key = "value"` string for a top-level TOML
+// key (ignoring comments and same-prefix keys like kernel_params). Good enough for
+// reading a single path out of Kata's configuration.toml without a TOML dep.
+func tomlFirstString(content, key string) string {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || !strings.HasPrefix(line, key) {
+			continue
+		}
+		after := strings.TrimLeft(line[len(key):], " \t")
+		if !strings.HasPrefix(after, "=") {
+			continue // e.g. kernel_params, not kernel
+		}
+		rest := after[1:]
+		if i := strings.Index(rest, "\""); i >= 0 {
+			rest = rest[i+1:]
+			if j := strings.Index(rest, "\""); j >= 0 {
+				return rest[:j]
+			}
+		}
+	}
+	return ""
 }
 
 // absPath resolves a local path to absolute (best-effort).

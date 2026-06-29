@@ -59,6 +59,15 @@ examples) run. vabbe arranges this automatically, zero config:
   the **`modprobe` CLI**; tools that read `/proc/modules` (`lsmod`, Ansible's
   `modprobe` module) need a modules-enabled guest kernel — see
   [Loadable-module tooling](#loadable-module-tooling-lsmod-ansible-modprobe) below.
+- **The guest kernel's build config is shipped in.** Tools that read it (kubeadm's
+  `SystemVerification`, which otherwise errors *"no config path available"* — the
+  Kata kernel has no `/proc/config.gz`) find it at `/boot/config-<kver>` and
+  `/lib/modules/<kver>/config`. vabbe locates the active Kata kernel's config on the
+  host — discovering the Kata install from the runtime's shim path in
+  `/etc/docker/daemon.json` (Docker's API doesn't expose it for shim-v2 runtimes),
+  honoring an `/etc/kata-containers/configuration.toml` override, falling back to
+  `/opt/kata` — bind-mounts it in, and `vabbe-kmod` places it where kubeadm looks.
+  Skipped silently if it can't be found.
 - **`vabbe exec`/`shell`/`ssh` go over real SSH** for a VM node (using the lab
   keypair and the node IP), not `docker exec`. A Kata node runs systemd, which owns
   the cgroup, so the runtime can't attach a `docker exec` process to it

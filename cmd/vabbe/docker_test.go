@@ -72,3 +72,21 @@ func TestParsePort(t *testing.T) {
 		}
 	}
 }
+
+func TestTomlFirstString(t *testing.T) {
+	cfg := `
+# comment
+kernel_params = "cgroup_no_v1=all"
+kernel = "/opt/kata/share/kata-containers/vmlinux.container"   # the guest kernel
+image = "/opt/kata/share/kata-containers/kata-containers.img"
+`
+	if got := tomlFirstString(cfg, "kernel"); got != "/opt/kata/share/kata-containers/vmlinux.container" {
+		t.Errorf("kernel = %q", got)
+	}
+	if got := tomlFirstString(cfg, "image"); got != "/opt/kata/share/kata-containers/kata-containers.img" {
+		t.Errorf("image = %q", got)
+	}
+	if got := tomlFirstString(cfg, "missing"); got != "" {
+		t.Errorf("missing should be empty, got %q", got)
+	}
+}

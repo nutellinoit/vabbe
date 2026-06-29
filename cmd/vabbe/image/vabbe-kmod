@@ -40,3 +40,13 @@ EOF
 : > "$D/modules.builtin.modinfo"   # optional file; empty silences a depmod warning
 
 depmod "$K" 2>/dev/null || true
+
+# Kernel build config: vabbe bind-mounts the Kata guest kernel's config here (VM
+# runtimes only). Place it where tools look — kubeadm's SystemVerification reads
+# /boot/config-<kver> and /lib/modules/<kver>/config (the Kata kernel exposes no
+# /proc/config.gz). Without this, kubeadm preflight errors "no config path".
+if [ -f /run/vabbe/kernel.config ]; then
+	cp /run/vabbe/kernel.config "$D/config" 2>/dev/null || true
+	mkdir -p /boot 2>/dev/null || true
+	cp /run/vabbe/kernel.config "/boot/config-$K" 2>/dev/null || true
+fi
