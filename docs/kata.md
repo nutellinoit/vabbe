@@ -31,11 +31,13 @@ examples) run. vabbe arranges this automatically, zero config:
   the OCI read-only paths `/sys/fs/cgroup` and `/proc/sys` **read-only**. systemd
   must *write* the cgroup tree (to create slices/scopes) — on a read-only cgroup it
   exits 255 and crash-loops — and installers need `/proc/sys` writable for `sysctl`
-  (kubeadm wants `net.ipv4.ip_forward=1`, Cilium/kube-proxy set many). So vabbe
-  gives a VM-runtime node **`CAP_SYS_ADMIN`** and a tiny shim that **remounts both
-  read-write before handing off to systemd**:
-  `sh -c "mount -o remount,rw /sys/fs/cgroup; mount -o remount,rw /proc/sys; exec /sbin/init"`.
-  (runc VM nodes get these rw via `privileged: true`.) Set your own
+  (kubeadm wants `net.ipv4.ip_forward=1`, Cilium/kube-proxy set many). It also
+  `mknod`s **`/dev/kmsg`**, which Kata's OCI-minimal `/dev` lacks — kubelet
+  crash-loops without it (the kernel has it, only the device node is missing). So
+  vabbe gives a VM-runtime node **`CAP_SYS_ADMIN`** and a tiny shim that does all
+  this before handing off to systemd:
+  `sh -c "mount -o remount,rw /sys/fs/cgroup; mount -o remount,rw /proc/sys; [ -e /dev/kmsg ] || mknod /dev/kmsg c 1 11; exec /sbin/init"`.
+  (runc VM nodes get all this via `privileged: true`.) Set your own
   `entrypoint:`/`cmd:` to override (the cap is still added).
 - **`privileged` defaults to `false`, but caps default to `ALL`** for a VM runtime.
   A Kata node is a hypervisor-isolated VM, so VM-grade capabilities inside are safe
