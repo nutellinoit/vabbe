@@ -9,6 +9,8 @@
 
 `vabbe` spins up Docker containers that act like throwaway VMs (systemd + sshd, static IPs on a network you define) for testing installers — like `kind`, but the nodes are generic VMs instead of a k8s cluster.
 
+I built it because I wanted **kind's ergonomics** — one tool, one `vabbe.yaml`, the same environments both **locally and in CI** — but for **generic nodes**, with the freedom to make each one a plain Docker container *or* a real VM (a **Kata micro-VM** with its own kernel + systemd) as the job demands, even mixed in the same lab. And I wanted something **small enough to build and understand from the ground up** — not another big system with its own daemon to wrestle.
+
 Tested on **Linux with Docker** and **macOS with Docker Desktop** — including **mixed `runc` + Kata labs** (some nodes shared-kernel, some real micro-VMs with their own kernel and systemd) running real installers (nginx, Postgres streaming replication) across both runtimes. See [Want real per-node kernels?](#want-real-per-node-kernels).
 
 ## Install
@@ -61,5 +63,16 @@ vabbe down --all   # remove ALL vabbe labs on the daemon (no -f needed; orphan c
 ## Want real per-node kernels?
 
 Set `runtime: kata` on a node (or in `defaults`) to run it as a lightweight VM with its own kernel via [Kata Containers](https://katacontainers.io) — a real VM, not a shared-kernel container, and **systemd still boots inside it** (so `systemctl` and installers work). It uses Kata as a normal **Docker runtime** — install Kata and register it in `daemon.json` (`runtimes.kata`), no separate tooling; vabbe drives it through Docker like any other node. Same node images as `runc`, nothing Kata-specific to build. See [`docs/kata.md`](docs/kata.md).
+
+## Alternatives & prior art
+
+vabbe doesn't invent new primitives — it's a thin, opinionated combination of well-trodden ones. If one of these fits your case better, use it:
+
+- **[kind](https://kind.sigs.k8s.io/)** — nodes-as-containers like vabbe, but specifically a Kubernetes cluster. Use it when you want k8s, not generic VMs.
+- **[Vagrant](https://www.vagrantup.com/) / [Multipass](https://multipass.run/) / [Lima](https://lima-vm.io/)** — real VMs: higher fidelity, heavier and slower. Reach for them when you need a true VM and don't mind the weight.
+- **[LXD / Incus](https://linuxcontainers.org/incus/)** — system containers that behave like VMs (systemd inside) plus a real VM mode, one API. The closest in spirit — but a bigger system with its own daemon.
+- **[Molecule](https://ansible.readthedocs.io/projects/molecule/)** + systemd-in-Docker images — the standard way to test Ansible roles in containers.
+
+vabbe's niche is the ergonomics: a single small binary on **plain Docker**, the **same `vabbe.yaml` for local and CI**, and a **per-node runtime** so you can mix cheap shared-kernel containers with real Kata micro-VMs in one lab. When you outgrow "good enough," the tools above are there.
 
 See [`docs/`](docs/) for everything else: config reference, gotchas, macOS specifics, the node image, releases.
