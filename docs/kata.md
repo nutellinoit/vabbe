@@ -103,11 +103,21 @@ jq '.runtimes.kata = {"runtimeType":"/opt/kata/bin/containerd-shim-kata-v2"}' \
    /etc/docker/daemon.json | sudo tee /etc/docker/daemon.json.new
 sudo mv /etc/docker/daemon.json.new /etc/docker/daemon.json
 
-# 3. Reload Docker HOT (re-reads runtimes; no container downtime — no restart)
+# 3. (Needed only if your installer LOADS kernel modules — Kubernetes/kubeadm,
+#     IPVS, …) Kata's default guest kernel has no loadable-module support, so it
+#     exposes no /proc/modules and `lsmod` / Ansible's modprobe module break. Point
+#     Kata at the modules-enabled kernel the static release already ships
+#     (`vmlinux-nvidia-gpu` — "nvidia" is just the build flavor; it's a normal
+#     kernel that boots fine without a GPU). See "Loadable-module tooling" below.
+sudo install -d /etc/kata-containers
+sudo cp /opt/kata/share/defaults/kata-containers/configuration-qemu.toml /etc/kata-containers/configuration.toml
+sudo sed -i 's#^kernel = .*#kernel = "/opt/kata/share/kata-containers/vmlinux-nvidia-gpu.container"#' /etc/kata-containers/configuration.toml
+
+# 4. Reload Docker HOT (re-reads runtimes; no container downtime — no restart)
 sudo systemctl reload docker
 docker info --format '{{range $k,$v := .Runtimes}}{{$k}} {{end}}'   # should list: kata
 
-# 4. Smoke test
+# 5. Smoke test
 docker run --runtime kata --rm ubuntu:24.04 uname -r   # shows the Kata guest kernel
 ```
 

@@ -62,7 +62,15 @@ vabbe down --all   # remove ALL vabbe labs on the daemon (no -f needed; orphan c
 
 ## Want real per-node kernels?
 
-Set `runtime: kata` on a node (or in `defaults`) to run it as a lightweight VM with its own kernel via [Kata Containers](https://katacontainers.io) — a real VM, not a shared-kernel container, and **systemd still boots inside it** (so `systemctl` and installers work). It uses Kata as a normal **Docker runtime** — install Kata and register it in `daemon.json` (`runtimes.kata`), no separate tooling; vabbe drives it through Docker like any other node. Same node images as `runc`, nothing Kata-specific to build. See [`docs/kata.md`](docs/kata.md).
+Set `runtime: kata` on a node (or in `defaults`) to run it as a lightweight VM with its own kernel via [Kata Containers](https://katacontainers.io) — a real VM, not a shared-kernel container, and **systemd still boots inside it** (so `systemctl` and installers work). vabbe drives it as a normal **Docker runtime** — same node images as `runc`, nothing Kata-specific to build.
+
+To use it you need:
+
+- a host with **KVM** (`/dev/kvm`) — bare metal, or a VM with nested virtualization;
+- **Kata installed and registered as a Docker runtime** (`/etc/docker/daemon.json` → `runtimes.kata`) — no other tooling;
+- only if your installer **loads kernel modules** (Kubernetes/kubeadm, IPVS…): point Kata at a **modules-enabled guest kernel** (the kata-static release already ships one, `vmlinux-nvidia-gpu` — it's a normal kernel, just the build name) so `lsmod`/Ansible `modprobe` work.
+
+See [`docs/kata.md`](docs/kata.md) for the install steps, host requirements, and that module-tooling note.
 
 ## Alternatives & prior art
 
