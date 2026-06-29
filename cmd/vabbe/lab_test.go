@@ -374,3 +374,26 @@ func TestShellQuote(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadRejectsEmbeddedResolverOnVMRuntime(t *testing.T) {
+	bad := `
+name: bad
+defaults: { runtime: kata }
+nodes:
+  - { name: a, dns: ["127.0.0.11"] }
+`
+	p := writeLab(t, t.TempDir(), bad)
+	if _, err := Load(p); err == nil {
+		t.Fatal("expected error: kata node can't use 127.0.0.11")
+	}
+	// runc node with 127.0.0.11 is fine (embedded resolver works there).
+	ok := `
+name: ok
+nodes:
+  - { name: a, dns: ["127.0.0.11"] }
+`
+	p2 := writeLab(t, t.TempDir(), ok)
+	if _, err := Load(p2); err != nil {
+		t.Fatalf("runc node with 127.0.0.11 should load: %v", err)
+	}
+}

@@ -234,6 +234,21 @@ func (d *Docker) createNode(ctx context.Context, lab *Lab, node *Node, pubKeyPat
 			hc.Memory = b
 		}
 	}
+	// Inject statically-addressed peers into /etc/hosts so nodes resolve each other
+	// by name. Docker's embedded resolver does this on runc, but it's unreachable
+	// inside a Kata VM (127.0.0.11 is the guest's own loopback) — /etc/hosts works
+	// everywhere. Auto-IP peers are skipped (their IP isn't known until they start;
+	// use `vabbe ip`/`inventory`).
+	for i := range lab.Nodes {
+		peer := &lab.Nodes[i]
+		if peer.Name == node.Name || peer.IP == "" {
+			continue
+		}
+		hc.ExtraHosts = append(hc.ExtraHosts, peer.Name+":"+peer.IP)
+		if peer.Hostname != "" && peer.Hostname != peer.Name {
+			hc.ExtraHosts = append(hc.ExtraHosts, peer.Hostname+":"+peer.IP)
+		}
+	}
 	cc := &container.Config{
 		Image:      node.Image,
 		Hostname:   node.Hostname,

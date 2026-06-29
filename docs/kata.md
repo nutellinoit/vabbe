@@ -57,16 +57,18 @@ guest's own loopback, with nothing listening, so name resolution silently fails.
 
 What this means for Kata nodes:
 
-- **Use a real upstream resolver.** vabbe's default (`1.1.1.1`, `1.0.0.1`) already
-  does this, so a Kata node resolves the internet out of the box (apt/dnf work).
-  Do **not** set `dns: ["127.0.0.11"]` on a Kata node — it'll have no DNS at all.
-  (Some examples set `127.0.0.11` for runc; override it to a real upstream when
-  running them under Kata.)
-- **No node-to-node name resolution.** With a real upstream (not the embedded
-  resolver) a node can't resolve its peers by name. Reference peers by **IP** —
-  `vabbe ip` / `vabbe inventory` / `vabbe dns` report the live addresses (static or
-  Docker-assigned). This matches the existing `dns:` trade-off in
-  [gotchas.md](gotchas.md), it's just unavoidable under Kata.
+- **Use a real upstream resolver** for external lookups. vabbe's default (`1.1.1.1`,
+  `1.0.0.1`) already does this, so a Kata node resolves the internet out of the box
+  (apt/dnf work). Setting `dns: ["127.0.0.11"]` on a Kata node would leave it with
+  no DNS at all, so **vabbe rejects it at `up`** with a clear error — switch that
+  node to a real upstream. (Some examples set `127.0.0.11` for runc; override it
+  when running them under Kata.)
+- **Node-to-node name resolution still works for statically-addressed nodes.**
+  vabbe injects every peer that has a static `ip:` into each node's `/etc/hosts`
+  (via Docker `ExtraHosts`), which *is* honored inside the VM — so `ping cp1` etc.
+  work without the embedded resolver. **Auto-assigned (no-subnet) peers** aren't in
+  `/etc/hosts` (their IP isn't known until they start), so reach those by **IP** —
+  `vabbe ip` / `vabbe inventory` / `vabbe dns` report the live addresses.
 
 ## Installing & registering Kata with Docker
 

@@ -230,6 +230,16 @@ func (l *Lab) validate() error {
 				return fmt.Errorf("node %q: invalid memory %q (use e.g. 512m, 4g): %w", n.Name, n.Memory, err)
 			}
 		}
+		// Docker's embedded resolver 127.0.0.11 is unreachable inside a VM-runtime
+		// guest (it's the guest's own loopback), so the node would have no DNS at
+		// all. Fail early with a clear message instead of a mysterious broken node.
+		if isVMRuntime(n.Runtime) {
+			for _, d := range l.NodeDNS(&n) {
+				if d == "127.0.0.11" {
+					return fmt.Errorf("node %q: runtime %q can't use Docker's embedded resolver 127.0.0.11 (unreachable inside the VM) — set a real upstream, e.g. dns: [1.1.1.1]", n.Name, n.Runtime)
+				}
+			}
+		}
 		if n.IP == "" {
 			continue // auto-assigned by Docker
 		}
