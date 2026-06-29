@@ -20,13 +20,31 @@ nodes:
 
 Empty/unset = Docker's default runtime (fully backwards compatible).
 
-## What changes when a node uses a non-default runtime
+## What changes when a node uses a VM runtime
 
-- vabbe **does not bind-mount the host `/lib/modules`** into the node: a Kata/gVisor
-  guest has its own kernel, so the host's modules would be the wrong kernel's.
-- `privileged` is left as you set it. With Kata you usually **don't need
-  privileged** (the node has a real kernel) — `privileged: false` is often fine
-  and cleaner.
+A node with a non-`runc` runtime is a real micro-VM with its own kernel. **systemd
+still boots as PID1**, so the node behaves like a normal VM — `systemctl` works,
+services start, installers that drive units (Kubernetes/kubelet, the ansible
+examples) run. vabbe arranges this automatically, zero config:
+
+- **systemd boots, but needs help.** Under Kata the node *is* a VM, and Kata mounts
+  `/sys/fs/cgroup` **read-only**. systemd-as-init must *write* the cgroup tree (to
+  create slices/scopes), so on a read-only cgroup it exits 255 and crash-loops. So
+  vabbe gives a VM-runtime node **`CAP_SYS_ADMIN`** and a tiny shim command that
+  **remounts `/sys/fs/cgroup` read-write before handing off to systemd**:
+  `sh -c "mount -o remount,rw /sys/fs/cgroup; exec /sbin/init"`. Set your own
+  `entrypoint:`/`cmd:` to override (the cap is still added).
+- **`privileged` defaults to `false`** for a VM runtime (you can still force it on).
+  `CAP_SYS_ADMIN` is enough for the cgroup remount, and full `privileged: true`
+  actually *breaks* Kata: it tries to recreate device nodes that already exist in
+  the guest (`Creating container device /dev/full … EEXIST`).
+- **`vabbe exec`/`shell`/`ssh` go over real SSH** for a VM node (using the lab
+  keypair and the node IP), not `docker exec`. A Kata node runs systemd, which owns
+  the cgroup, so the runtime can't attach a `docker exec` process to it
+  (`EBUSY: Failed to attach processes to control group`). Readiness (`up --wait`)
+  is likewise a TCP probe of port 22 instead of a `docker exec` of `systemctl`.
+- vabbe **does not bind-mount the host `/lib/modules`**: the guest has its own
+  kernel, so the host's modules would be the wrong kernel's.
 - `vabbe doctor` lists the daemon's available runtimes and flags a node whose
   `runtime:` the daemon doesn't have, so you catch it before `up`.
 
@@ -56,6 +74,21 @@ docker info --format '{{range $k,$v := .Runtimes}}{{$k}} {{end}}'   # should lis
 # 4. Smoke test
 docker run --runtime kata --rm ubuntu:24.04 uname -r   # shows the Kata guest kernel
 ```
+
+## Sizing the VM (`cpus:` / `memory:`)
+
+Set `cpus:`/`memory:` on a node (or in `defaults`) to size the guest VM — they map
+to Docker's `--cpus`/`--memory`, which Kata uses to size the micro-VM:
+
+```yaml
+nodes:
+  - { name: cp0, runtime: kata, cpus: 2, memory: 4g }
+```
+
+Heads-up: Kata sizes the guest **on top of** its config base
+(`default_vcpus`/`default_memory` in `configuration.toml`, default `1` / `2048`).
+So `cpus: 2` yields ~3 vCPUs and `memory: 4g` ~6 GB on a stock config. For exact
+sizing, set `default_vcpus = 0` / lower `default_memory` in the Kata config.
 
 ## Host requirements (the gotchas we actually hit)
 

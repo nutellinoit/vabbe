@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -232,13 +234,52 @@ var shellPref string
 
 // sshInto runs an interactive shell in the node. The shell is `--shell` if set,
 // else bash when present (falling back to sh).
-func sshInto(dk *Docker, labName, node string) error {
+func sshInto(lab *Lab, dk *Docker, node string) error {
 	ctx := context.Background()
 	shell := shellPref
 	if shell == "" {
-		shell = dk.pickShell(ctx, labName, node)
+		if n := lab.nodeByName(node); n != nil && isVMRuntime(n.Runtime) {
+			// Can't docker-exec a VM node to probe; vabbe-node images ship bash.
+			shell = "bash"
+		} else {
+			shell = dk.pickShell(ctx, lab.Name, node)
+		}
 	}
-	return dk.Exec(ctx, labName, node, []string{shell}, true)
+	return nodeExec(lab, dk, node, []string{shell}, true)
+}
+
+// nodeExec runs cmd in a node. A VM-runtime node (Kata etc.) runs systemd but owns
+// its cgroup, so docker exec can't attach a process to it (EBUSY) — for those we
+// shell out to real ssh over the lab keypair. Shared-kernel (runc) nodes keep
+// using docker exec, which works before sshd/the network has even settled.
+func nodeExec(lab *Lab, dk *Docker, node string, cmd []string, tty bool) error {
+	if n := lab.nodeByName(node); n != nil && isVMRuntime(n.Runtime) {
+		return sshExec(lab, dk, node, cmd, tty)
+	}
+	return dk.Exec(context.Background(), lab.Name, node, cmd, tty)
+}
+
+// sshExec runs cmd in a node via the system `ssh` client, using the lab keypair
+// and the node's live IP. Used for VM-runtime nodes (see nodeExec).
+func sshExec(lab *Lab, dk *Docker, node string, cmd []string, tty bool) error {
+	ip, err := dk.IP(context.Background(), lab.Name, node)
+	if err != nil {
+		return err
+	}
+	args := []string{
+		"-i", filepath.Join(lab.VabbeDir(), "id_ed25519"),
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "LogLevel=ERROR",
+	}
+	if tty {
+		args = append(args, "-t")
+	}
+	args = append(args, "root@"+ip)
+	args = append(args, cmd...)
+	c := exec.Command("ssh", args...)
+	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return c.Run()
 }
 
 var sshCmd = &cobra.Command{
@@ -250,7 +291,7 @@ var sshCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return sshInto(dk, lab.Name, a[0])
+		return sshInto(lab, dk, a[0])
 	},
 }
 
@@ -273,7 +314,7 @@ var shellCmd = &cobra.Command{
 			node = r.Name
 		}
 		fmt.Printf("→ %s\n", node)
-		return sshInto(dk, lab.Name, node)
+		return sshInto(lab, dk, node)
 	},
 }
 
@@ -293,7 +334,7 @@ var execCmd = &cobra.Command{
 		if len(rest) == 0 {
 			rest = []string{"sh"}
 		}
-		return dk.Exec(context.Background(), lab.Name, a[0], rest, isTerminal())
+		return nodeExec(lab, dk, a[0], rest, isTerminal())
 	},
 }
 
@@ -333,7 +374,7 @@ func init() {
 	lsCmd.Flags().BoolVar(&lsJSON, "json", false, "output as JSON")
 	shellCmd.Flags().StringVar(&shellPref, "shell", "", "shell to use (default: bash if present, else sh)")
 	sshCmd.Flags().StringVar(&shellPref, "shell", "", "shell to use (default: bash if present, else sh)")
-	upCmd.Flags().BoolVar(&upRecreate, "recreate", false, "recreate nodes whose config has drifted (image/env/mounts/ports/privileged/entrypoint/cmd)")
+	upCmd.Flags().BoolVar(&upRecreate, "recreate", false, "recreate nodes whose config has drifted (image/env/mounts/ports/privileged/runtime/cpus/memory/entrypoint/cmd)")
 	upCmd.Flags().BoolVar(&upWait, "wait", false, "wait until each node is reachable (sshd up) before returning")
 	upCmd.Flags().DurationVar(&upTimeout, "timeout", 90*time.Second, "max time to wait when --wait is set")
 }

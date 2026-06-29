@@ -11,14 +11,18 @@ defaults:                   # optional, applied to every node before the node's 
   privileged: <bool>
   dns: [<ip>...]            # optional; node resolv.conf upstreams (default [1.1.1.1, 1.0.0.1])
   runtime: <name>          # optional; OCI runtime, e.g. kata (default: Docker's, runc). See docs/kata.md
+  cpus: <number>           # optional; default vCPUs for every node
+  memory: <size>           # optional; default RAM for every node (e.g. 4g)
 nodes:                      # at least one
   - name: <node-name>       # required; becomes the container hostname unless `hostname` is set
     ip: <ipv4>              # optional; static IP (needs network.subnet). Omit for a Docker-
                             # assigned IP — discover it with `vabbe ip`/`inventory`/`dns`/`ls`.
     image: <image>          # optional; falls back to defaults.image, then the vabbe default
-    privileged: <bool>      # optional; defaults true (defaults to true)
+    privileged: <bool>      # optional; default true for runc, false for VM runtimes (kata)
     dns: [<ip>...]          # optional; overrides defaults.dns for this node
     runtime: <name>        # optional; overrides defaults.runtime (e.g. kata; "" = runc)
+    cpus: <number>         # optional; vCPUs (e.g. 2, 1.5). Maps to Docker --cpus.
+    memory: <size>         # optional; RAM, e.g. 512m, 4g. Maps to Docker --memory.
     entrypoint: [<str>...]  # optional; overrides the image's ENTRYPOINT (runner-friendly)
     cmd: [<str>...]         # optional; overrides the image's CMD
     mounts: [<bind>...]     # optional; `host:container[:ro]`
@@ -37,7 +41,13 @@ nodes:                      # at least one
 
 ## Defaults vabbe applies automatically
 
-- `privileged: true` for VM nodes.
+- `privileged: true` for `runc` VM nodes; **`false` for VM-runtime nodes** (Kata
+  etc. — they have their own kernel and `privileged: true` breaks Kata device
+  setup). See `docs/kata.md`.
+- For a **VM-runtime node** (e.g. `runtime: kata`), systemd still boots as PID1,
+  but vabbe adds `CAP_SYS_ADMIN` and a shim cmd that remounts `/sys/fs/cgroup` rw
+  first (Kata mounts it read-only, which systemd-as-init can't use). `vabbe
+  exec`/`shell`/`ssh` then go over real SSH, not `docker exec`. See `docs/kata.md`.
 - tmpfs on `/run`, `/run/lock`, `/tmp`.
 - `StopSignal: SIGRTMIN+3` (clean systemd shutdown).
 - Node `/etc/resolv.conf` is rewritten at boot to the `dns:` upstreams (default

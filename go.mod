@@ -2,10 +2,18 @@ module github.com/nutellinoit/vabbe
 
 go 1.25.0
 
+// v0.3.0 shipped the runtime: field but systemd crash-looped under Kata; v0.3.1
+// makes it actually boot. The proxy can't be purged, so retract the bad versions.
+retract (
+	v0.3.0
+	v0.3.0-rc.0
+)
+
 require (
 	github.com/containerd/errdefs v1.0.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.7.0
+	github.com/docker/go-units v0.5.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.53.0
 	golang.org/x/term v0.44.0
@@ -18,7 +26,6 @@ require (
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/docker/go-units v0.5.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

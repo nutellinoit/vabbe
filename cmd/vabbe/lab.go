@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 
+	"github.com/docker/go-units"
 	"gopkg.in/yaml.v3"
 )
 
@@ -47,6 +48,8 @@ type Defaults struct {
 	Privileged *bool    `yaml:"privileged"`
 	DNS        []string `yaml:"dns"`
 	Runtime    *string  `yaml:"runtime"`
+	Cpus       *float64 `yaml:"cpus"`
+	Memory     *string  `yaml:"memory"`
 }
 
 type Node struct {
@@ -64,6 +67,8 @@ type Node struct {
 	Privileged *bool             `yaml:"privileged"`
 	DNS        []string          `yaml:"dns"`
 	Runtime    string            `yaml:"runtime"`
+	Cpus       float64           `yaml:"cpus"`
+	Memory     string            `yaml:"memory"`
 }
 
 func Load(path string) (*Lab, error) {
@@ -111,6 +116,30 @@ func loadAndDocker() (*Lab, *Docker, error) {
 	return lab, dk, nil
 }
 
+// isVMRuntime reports whether a runtime gives the node its own kernel (a real
+// micro-VM, e.g. Kata or gVisor) rather than sharing the host's. Empty and the
+// kernel-sharing default "runc" are not VM runtimes; under those systemd boots as
+// PID1 normally. A VM-runtime node instead runs sshd as PID1 (see applyDefaults).
+func isVMRuntime(rt string) bool {
+	return rt != "" && rt != "runc"
+}
+
+// parseMemory turns a human size ("512m", "4g") into bytes. For a VM runtime
+// (Kata) this sizes the guest VM's RAM; under runc it's the cgroup memory limit.
+func parseMemory(s string) (int64, error) {
+	return units.RAMInBytes(s)
+}
+
+// appendUnique appends s to caps unless it's already present.
+func appendUnique(caps []string, s string) []string {
+	for _, c := range caps {
+		if c == s {
+			return caps
+		}
+	}
+	return append(caps, s)
+}
+
 func (l *Lab) applyDefaults() {
 	for i := range l.Nodes {
 		n := &l.Nodes[i]
@@ -123,8 +152,25 @@ func (l *Lab) applyDefaults() {
 		if n.Hostname == "" {
 			n.Hostname = n.Name
 		}
+		// Resolve the runtime before privileged: a VM runtime changes the default.
+		if n.Runtime == "" && l.Defaults.Runtime != nil {
+			n.Runtime = *l.Defaults.Runtime
+		}
+		if n.Cpus == 0 && l.Defaults.Cpus != nil {
+			n.Cpus = *l.Defaults.Cpus
+		}
+		if n.Memory == "" && l.Defaults.Memory != nil {
+			n.Memory = *l.Defaults.Memory
+		}
 		if n.Privileged == nil {
 			if n.Runner {
+				p := false
+				n.Privileged = &p
+			} else if isVMRuntime(n.Runtime) {
+				// A VM runtime (Kata, gVisor) gives the node its own kernel, so it
+				// doesn't need host privilege — and privileged: true actually breaks
+				// Kata (it tries to recreate device nodes like /dev/full → EEXIST).
+				// Default off; the user can still force it on per node / in defaults.
 				p := false
 				n.Privileged = &p
 			} else if l.Defaults.Privileged != nil {
@@ -135,8 +181,19 @@ func (l *Lab) applyDefaults() {
 				n.Privileged = &t
 			}
 		}
-		if n.Runtime == "" && l.Defaults.Runtime != nil {
-			n.Runtime = *l.Defaults.Runtime
+		// A node under a VM runtime (Kata, gVisor) is a real micro-VM with its own
+		// kernel. systemd still boots as PID1 there, but Kata mounts /sys/fs/cgroup
+		// read-only, and systemd-as-init needs to *write* it (to create slices) — so
+		// it exits 255 and crash-loops. The fix: CAP_SYS_ADMIN so the cgroup can be
+		// remounted rw, plus a tiny shim cmd that does the remount before handing off
+		// to systemd. (privileged would also make cgroup rw but breaks Kata: it
+		// recreates device nodes that already exist → /dev/full EEXIST.) A user-set
+		// entrypoint/cmd, or runner:, opts out; so does runtime: runc.
+		if isVMRuntime(n.Runtime) && !n.Runner {
+			n.Caps = appendUnique(n.Caps, "SYS_ADMIN")
+			if len(n.Entrypoint) == 0 && len(n.Cmd) == 0 {
+				n.Cmd = []string{"/bin/sh", "-c", "mount -o remount,rw /sys/fs/cgroup 2>/dev/null; exec /sbin/init"}
+			}
 		}
 		for k, v := range n.Env {
 			n.Env[k] = expandEnv(v)
@@ -165,6 +222,14 @@ func (l *Lab) validate() error {
 			return fmt.Errorf("duplicate node name %q", n.Name)
 		}
 		seenName[n.Name] = true
+		if n.Cpus < 0 {
+			return fmt.Errorf("node %q: cpus must be >= 0, got %v", n.Name, n.Cpus)
+		}
+		if n.Memory != "" {
+			if _, err := parseMemory(n.Memory); err != nil {
+				return fmt.Errorf("node %q: invalid memory %q (use e.g. 512m, 4g): %w", n.Name, n.Memory, err)
+			}
+		}
 		if n.IP == "" {
 			continue // auto-assigned by Docker
 		}
@@ -225,6 +290,15 @@ func validatePortNum(p string) error {
 	n, err := strconv.Atoi(p)
 	if err != nil || n < 1 || n > 65535 {
 		return fmt.Errorf("port %q out of range 1-65535", p)
+	}
+	return nil
+}
+
+func (l *Lab) nodeByName(name string) *Node {
+	for i := range l.Nodes {
+		if l.Nodes[i].Name == name {
+			return &l.Nodes[i]
+		}
 	}
 	return nil
 }

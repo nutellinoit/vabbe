@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types"
@@ -130,6 +132,23 @@ func (d *Docker) Reachable(ctx context.Context, lab *Lab, node *Node) bool {
 	if node.Runner {
 		return c.State == "running"
 	}
+	// VM-runtime nodes (Kata etc.) run systemd as PID1 but own their cgroup, so
+	// docker exec can't enter them (EBUSY). Probe sshd over TCP on the node IP.
+	if isVMRuntime(node.Runtime) {
+		if c.State != "running" {
+			return false
+		}
+		ip, err := d.IP(ctx, lab.Name, node.Name)
+		if err != nil || ip == "" {
+			return false
+		}
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, "22"), 2*time.Second)
+		if err != nil {
+			return false
+		}
+		_ = conn.Close()
+		return true
+	}
 	// The sshd unit is "ssh" on Debian/Ubuntu and "sshd" on RHEL/Rocky — accept
 	// either so readiness works across node bases.
 	code, err := d.execCode(ctx, c.ID, []string{"sh", "-c",
@@ -204,12 +223,23 @@ func (d *Docker) createNode(ctx context.Context, lab *Lab, node *Node, pubKeyPat
 		PublishAllPorts: false,
 		Runtime:         node.Runtime, // "" => daemon default (runc)
 	}
+	// cpus/memory size the node. Under a VM runtime (Kata) Docker passes these to
+	// the runtime, which sizes the guest VM's vCPUs/RAM; under runc they're the
+	// usual cgroup limits. Memory is pre-validated in lab.validate().
+	if node.Cpus > 0 {
+		hc.NanoCPUs = int64(node.Cpus * 1e9)
+	}
+	if node.Memory != "" {
+		if b, err := parseMemory(node.Memory); err == nil {
+			hc.Memory = b
+		}
+	}
 	cc := &container.Config{
 		Image:      node.Image,
 		Hostname:   node.Hostname,
 		Env:        env,
 		Labels:     map[string]string{labelLab: lab.Name, labelNode: node.Name},
-		StopSignal: "SIGRTMIN+3",
+		StopSignal: "SIGRTMIN+3", // systemd's clean-shutdown signal (boots as PID1 under runc and Kata)
 	}
 	if len(node.Entrypoint) > 0 {
 		cc.Entrypoint = strslice.StrSlice(node.Entrypoint)
@@ -339,6 +369,14 @@ func (d *Docker) drift(ctx context.Context, lab *Lab, node *Node, id string) []s
 		// default otherwise, which would be a false positive).
 		if node.Runtime != "" && info.HostConfig.Runtime != node.Runtime {
 			r = append(r, fmt.Sprintf("runtime (%s → %s)", info.HostConfig.Runtime, node.Runtime))
+		}
+		if node.Cpus > 0 && info.HostConfig.NanoCPUs != int64(node.Cpus*1e9) {
+			r = append(r, "cpus")
+		}
+		if node.Memory != "" {
+			if b, err := parseMemory(node.Memory); err == nil && info.HostConfig.Memory != b {
+				r = append(r, "memory")
+			}
 		}
 		for _, m := range node.Mounts {
 			if !sliceContains(info.HostConfig.Binds, absBind(lab.Dir(), m)) {

@@ -135,6 +135,103 @@ nodes:
 	}
 }
 
+func hasCap(caps []string, want string) bool {
+	for _, c := range caps {
+		if c == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestRuntimeNodeKataSystemd(t *testing.T) {
+	cfg := `
+name: rt
+defaults: { runtime: kata }
+nodes:
+  - { name: auto }
+  - { name: custom, cmd: ["/usr/sbin/sshd","-D"] }
+  - { name: runner, runner: true }
+  - { name: plain, runtime: runc }
+`
+	p := writeLab(t, t.TempDir(), cfg)
+	lab, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	byName := map[string]*Node{}
+	for i := range lab.Nodes {
+		byName[lab.Nodes[i].Name] = &lab.Nodes[i]
+	}
+	// kata node with no cmd gets the cgroup-remount-then-systemd shim + SYS_ADMIN,
+	// so systemd boots as PID1 inside the VM.
+	got := byName["auto"].Cmd
+	if len(got) != 3 || got[2] != "mount -o remount,rw /sys/fs/cgroup 2>/dev/null; exec /sbin/init" {
+		t.Errorf("auto node should default to the systemd shim cmd, got %v", got)
+	}
+	if !hasCap(byName["auto"].Caps, "SYS_ADMIN") {
+		t.Errorf("auto kata node should get SYS_ADMIN, got %v", byName["auto"].Caps)
+	}
+	// explicit cmd wins, but SYS_ADMIN is still added (needed for cgroup rw).
+	if c := byName["custom"].Cmd; len(c) != 2 || c[0] != "/usr/sbin/sshd" {
+		t.Errorf("custom node cmd should be preserved, got %v", c)
+	}
+	if !hasCap(byName["custom"].Caps, "SYS_ADMIN") {
+		t.Errorf("custom kata node should still get SYS_ADMIN, got %v", byName["custom"].Caps)
+	}
+	// runner opts out entirely (manages its own entrypoint, no SYS_ADMIN).
+	if c := byName["runner"].Cmd; len(c) != 0 {
+		t.Errorf("runner should not get the systemd cmd, got %v", c)
+	}
+	if hasCap(byName["runner"].Caps, "SYS_ADMIN") {
+		t.Errorf("runner should not get SYS_ADMIN")
+	}
+	// explicit runtime: runc shares the host kernel — systemd boots normally, no
+	// shim/cap needed and the image CMD is kept.
+	if c := byName["plain"].Cmd; len(c) != 0 {
+		t.Errorf("runc node should keep image CMD, got %v", c)
+	}
+	if hasCap(byName["plain"].Caps, "SYS_ADMIN") {
+		t.Errorf("runc node should not get SYS_ADMIN")
+	}
+}
+
+func TestLoadCpusMemory(t *testing.T) {
+	cfg := `
+name: rt
+defaults: { cpus: 2, memory: 2g }
+nodes:
+  - { name: a }
+  - { name: b, cpus: 4, memory: 8g }
+`
+	p := writeLab(t, t.TempDir(), cfg)
+	lab, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if lab.Nodes[0].Cpus != 2 || lab.Nodes[0].Memory != "2g" {
+		t.Errorf("node a should inherit defaults cpus=2 memory=2g, got %v/%q", lab.Nodes[0].Cpus, lab.Nodes[0].Memory)
+	}
+	if lab.Nodes[1].Cpus != 4 || lab.Nodes[1].Memory != "8g" {
+		t.Errorf("node b should keep its override cpus=4 memory=8g, got %v/%q", lab.Nodes[1].Cpus, lab.Nodes[1].Memory)
+	}
+	if b, err := parseMemory(lab.Nodes[1].Memory); err != nil || b != 8*1024*1024*1024 {
+		t.Errorf("parseMemory(8g) = %d, %v", b, err)
+	}
+}
+
+func TestLoadRejectsBadMemory(t *testing.T) {
+	bad := `
+name: bad
+nodes:
+  - { name: a, memory: "not-a-size" }
+`
+	p := writeLab(t, t.TempDir(), bad)
+	if _, err := Load(p); err == nil {
+		t.Fatal("expected error for invalid memory")
+	}
+}
+
 func TestLoadAutoNetwork(t *testing.T) {
 	auto := `
 name: auto
