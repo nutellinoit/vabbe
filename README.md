@@ -29,7 +29,7 @@ mise use -g github:nutellinoit/vabbe
 ```yaml
 name: e2e
 network: { subnet: 10.10.1.0/24 }
-defaults: { image: ghcr.io/nutellinoit/vabbe-node:v0.2.0 }
+defaults: { image: ghcr.io/nutellinoit/vabbe-node:v0.3.0 }
 nodes:
   - { name: a, ip: 10.10.1.2 }
   - { name: b, ip: 10.10.1.3 }
@@ -57,5 +57,9 @@ vabbe down --all   # remove ALL vabbe labs on the daemon (no -f needed; orphan c
 ## The one rule that surprises people
 
 **On macOS Docker Desktop the host cannot route to container IPs.** Run your driver (ansible/furyctl/kubectl) as an in-network `runner` node, not on the host. `vabbe ssh`/`exec`/`shell` use `docker exec`, so they work on both OSes.
+
+## Want real per-node kernels?
+
+Set `runtime: kata` on a node (or in `defaults`) to run it as a lightweight VM with its own kernel via [Kata Containers](https://katacontainers.io) — closer to a real VM than a shared-kernel container. See [`docs/kata.md`](docs/kata.md).
 
 See [`docs/`](docs/) for everything else: config reference, gotchas, macOS specifics, the node image, releases.

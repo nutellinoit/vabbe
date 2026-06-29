@@ -10,6 +10,7 @@ defaults:                   # optional, applied to every node before the node's 
   image: <image>
   privileged: <bool>
   dns: [<ip>...]            # optional; node resolv.conf upstreams (default [1.1.1.1, 1.0.0.1])
+  runtime: <name>          # optional; OCI runtime, e.g. kata (default: Docker's, runc). See docs/kata.md
 nodes:                      # at least one
   - name: <node-name>       # required; becomes the container hostname unless `hostname` is set
     ip: <ipv4>              # optional; static IP (needs network.subnet). Omit for a Docker-
@@ -17,6 +18,7 @@ nodes:                      # at least one
     image: <image>          # optional; falls back to defaults.image, then the vabbe default
     privileged: <bool>      # optional; defaults true (defaults to true)
     dns: [<ip>...]          # optional; overrides defaults.dns for this node
+    runtime: <name>        # optional; overrides defaults.runtime (e.g. kata; "" = runc)
     entrypoint: [<str>...]  # optional; overrides the image's ENTRYPOINT (runner-friendly)
     cmd: [<str>...]         # optional; overrides the image's CMD
     mounts: [<bind>...]     # optional; `host:container[:ro]`
