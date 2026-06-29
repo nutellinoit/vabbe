@@ -9,7 +9,7 @@
 
 `vabbe` spins up Docker containers that act like throwaway VMs (systemd + sshd, static IPs on a network you define) for testing installers — like `kind`, but the nodes are generic VMs instead of a k8s cluster.
 
-Tested on **Linux with Docker** and **macOS with Docker Desktop**.
+Tested on **Linux with Docker** and **macOS with Docker Desktop** — including **mixed `runc` + Kata labs** (some nodes shared-kernel, some real micro-VMs with their own kernel and systemd) running real installers (nginx, Postgres streaming replication) across both runtimes. See [Want real per-node kernels?](#want-real-per-node-kernels).
 
 ## Install
 
@@ -29,7 +29,7 @@ mise use -g github:nutellinoit/vabbe
 ```yaml
 name: e2e
 network: { subnet: 10.10.1.0/24 }
-defaults: { image: ghcr.io/nutellinoit/vabbe-node:v0.3.0 }
+defaults: { image: ghcr.io/nutellinoit/vabbe-node:v0.3.2 }
 nodes:
   - { name: a, ip: 10.10.1.2 }
   - { name: b, ip: 10.10.1.3 }
